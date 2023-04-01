@@ -4,6 +4,7 @@ This library can be freely used within any of your projects, as long as there ar
 
 ## Comgenie.Server
 This library gives the ability to run http and smtp servers from your own code, including automatic valid SSL for both (using LetsEncrypt). The library should be easy to expand with other tcp servers as well. 
+Available as [nuget package](https://www.nuget.org/packages/Comgenie.Server/) .
 
 The http server has the following features:
 
