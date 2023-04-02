@@ -129,6 +129,7 @@ namespace Comgenie.Server.Handlers
                     // TODO: Support fin
                     if (!fin)
                     {
+                        Log.Warning(nameof(HttpHandler), "Unsupported websocket option: fin = 0");
                         // TODO
                     }
                     else
@@ -147,6 +148,10 @@ namespace Comgenie.Server.Handlers
                             // TODO, body contents is reason of closing
                             // Just echo for now
                             data.SendWebsocketMessage(0x08, data.IncomingBuffer, offset, msglen);
+                        }
+                        else
+                        {
+                            Log.Warning(nameof(HttpHandler), "Unsupported websocket opcode: " + opcode);
                         }
                     }
 
@@ -836,10 +841,9 @@ namespace Comgenie.Server.Handlers
                                 { "Upgrade", "websocket" },
                                 { "Connection", "Upgrade" },
                                 { "Sec-WebSocket-Accept", accept }
-                            }
+                            },
+                            ContentType = ""
                         };
-                        //if (route.WebsocketConnectHandler != null) 
-                        //    route.WebsocketConnectHandler(data); TODO, call this one after our response has been sent
                         data.WebsocketFrameHandler = route.WebsocketReceiveHandler;
                         data.WebsocketDisconnectedHandler = route.WebsocketDisconnectHandler;
                     }
@@ -888,7 +892,8 @@ namespace Comgenie.Server.Handlers
             
             StringBuilder sb = new StringBuilder();
             sb.AppendLine("HTTP/1.1 " + response.StatusCode + " " + codeText);
-            sb.AppendLine("Content-Type: " + (response.ContentType ?? "text/html"));
+            if (response.ContentType != "")
+                sb.AppendLine("Content-Type: " + (response.ContentType ?? "text/html"));
 
             if (response.GZipResponse && data.Headers.ContainsKey("accept-encoding") && data.Headers["accept-encoding"].Contains("gzip") && response.Data == null && response.Stream != null)
             {
@@ -902,10 +907,10 @@ namespace Comgenie.Server.Handlers
                 response.ContentLengthStream = -1;
             }
             else
-            {                
-                sb.AppendLine("Content-Length: " + (response.Data != null ? response.Data.Length : response.Stream != null ? response.ContentLengthStream : 0));
-            }
-            
+            {
+                if (response.ContentType != "")
+                    sb.AppendLine("Content-Length: " + (response.Data != null ? response.Data.Length : response.Stream != null ? response.ContentLengthStream : 0));
+            }            
 
             if (response.Headers != null)
             {
@@ -1210,6 +1215,14 @@ namespace Comgenie.Server.Handlers
             public void SendWebsocketMessage(byte opcode, byte[] data)
             {
                 SendWebsocketMessage(opcode, data, 0, (ulong)data.Length);
+            }
+            public void SendWebsocketText(string text)
+            {
+                SendWebsocketMessage(0x01, ASCIIEncoding.UTF8.GetBytes(text));
+            }
+            public void SendWebsocketJsonObject(object obj)
+            {
+                SendWebsocketMessage(0x01, ASCIIEncoding.UTF8.GetBytes(JsonSerializer.Serialize(obj)));
             }
         }        
 

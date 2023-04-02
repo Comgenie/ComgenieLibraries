@@ -36,14 +36,14 @@ namespace HttpServerExample
                     connectHandler: (client) =>
                     {
                         Console.WriteLine("Websocket client connected");
-                        client.SendWebsocketMessage(0x01, Encoding.UTF8.GetBytes("Welcome " + client.Client.RemoteAddress));
+                        client.SendWebsocketText("Welcome " + client.Client.RemoteAddress);
                     },
                     messageReceivedHandler: (client, opcode, buffer, offset, len) =>
                     {
                         if (opcode == 1) // text
                         {
                             var str = Encoding.UTF8.GetString(buffer, (int)offset, (int)len);
-                            client.SendWebsocketMessage(0x01, Encoding.UTF8.GetBytes(str.ToUpper()));
+                            client.SendWebsocketText(str.ToUpper());
                         }
                     },
                     disconnectHandler: (client) =>

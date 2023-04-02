@@ -71,13 +71,20 @@ namespace Comgenie.Server
         {
             lock (this)
             {
-                if ((Socket != null && !Socket.Connected) || !StreamIsReady) 
-                    throw new Exception("Not connected");
-                //Stream.WriteTimeout = 60 * 1000;                
-                Stream.Write(buffer, pos, len);
-                if (flush)
-                    Stream.Flush();
-                LastDataSentMoment = DateTime.UtcNow;
+                try
+                {
+                    if ((Socket != null && !Socket.Connected) || !StreamIsReady)
+                        throw new Exception("Not connected");
+                    //Stream.WriteTimeout = 60 * 1000;                
+                    Stream.Write(buffer, pos, len);
+                    if (flush)
+                        Stream.Flush();
+                    LastDataSentMoment = DateTime.UtcNow;
+                }
+                catch (Exception e)
+                {
+                    Log.Debug(nameof(Client), "Could not send stream: " + e.Message);
+                }
             }
         }
 
