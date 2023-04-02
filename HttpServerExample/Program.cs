@@ -31,14 +31,35 @@ namespace HttpServerExample
                 // Reverse proxy route
                 // http.AddProxyRoute(domain, "/proxy", "https://...")
 
+                // Websocket route
+                http.AddWebsocketRoute(domain, "/websocket",
+                    connectHandler: (client) =>
+                    {
+                        Console.WriteLine("Websocket client connected");
+                        client.SendWebsocketMessage(0x01, Encoding.UTF8.GetBytes("Welcome " + client.Client.RemoteAddress));
+                    },
+                    messageReceivedHandler: (client, opcode, buffer, offset, len) =>
+                    {
+                        if (opcode == 1) // text
+                        {
+                            var str = Encoding.UTF8.GetString(buffer, (int)offset, (int)len);
+                            client.SendWebsocketMessage(0x01, Encoding.UTF8.GetBytes(str.ToUpper()));
+                        }
+                    },
+                    disconnectHandler: (client) =>
+                    {
+                        Console.WriteLine("Websocket client disconnected");
+                    }
+                );
+
                 /// Start listening to http and https
                 server.Listen(80, false, http);
                 server.Listen(443, true, http);
 
                 /// Generate a valid SSL certificate using LetsEncrypt (otherwise by default a self signed is used)
                 // Note: Only uncomment these following lines if you agree to the LetsEncrypt terms of service at https://letsencrypt.org/repository/
-                var letsEncryptUtil = new LetsEncryptUtil(server, http, "your.email@address.here", false);
-                letsEncryptUtil.CheckAndRenewAllServerDomains();
+                //var letsEncryptUtil = new LetsEncryptUtil(server, http, "your.email@address.here", false);
+                //letsEncryptUtil.CheckAndRenewAllServerDomains();
 
                 /// Keep this application running
                 Console.WriteLine("Server started. Press enter to exit");

@@ -1,6 +1,7 @@
 ﻿using Comgenie.Server.Utils;
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Globalization;
 using System.IO;
 using System.IO.Compression;
@@ -38,7 +39,11 @@ namespace Comgenie.Server.Handlers
 
         public void ClientDisconnect(Client client)
         {
-            
+            if (client.Data == null)
+                return;
+            var data = (HttpClientData)client.Data;
+            if (data.WebsocketDisconnectedHandler != null)
+                data.WebsocketDisconnectedHandler(data);
         }
         public void AddPostProcessor(Action<HttpClientData, HttpResponse> postProcessor)
         {
@@ -70,6 +75,87 @@ namespace Comgenie.Server.Handlers
             data.IncomingBufferLength += len;            
             while (data.IncomingBufferLength > 1)
             {                
+                if (data.WebsocketFrameHandler != null)
+                {
+                    if (data.IncomingBufferLength <= 2)
+                        break;
+                    var fin = (data.IncomingBuffer[0] & 0b10000000) != 1;
+                    var mask = (data.IncomingBuffer[1] & 0b10000000) != 0;
+                    var opcode = (data.IncomingBuffer[0] & 0b00001111);
+                    ulong offset = 2;
+
+                    var msglen = (ulong)(data.IncomingBuffer[1] & 0b01111111);
+                    if (msglen == 126)
+                    {
+                        if (data.IncomingBufferLength < 4) // Not enough data yet
+                            break;
+                        // Longer message (2 byte len), add more bytes (note: websocket uses big-endian) 
+                        msglen = ((ulong)data.IncomingBuffer[2]) << 8;
+                        msglen += ((ulong)data.IncomingBuffer[3]);
+                        offset += 2;
+                        
+                    }
+                    else if (msglen == 127 && data.IncomingBufferLength >= 10)
+                    {
+                        if (data.IncomingBufferLength < 10) // Not enough data yet
+                            break;
+                        // Longest message (8 byte len), add more bytes 
+                        msglen = ((ulong)data.IncomingBuffer[2]) << 56;
+                        msglen += ((ulong)data.IncomingBuffer[3]) << 48;
+                        msglen += ((ulong)data.IncomingBuffer[4]) << 40;
+                        msglen += ((ulong)data.IncomingBuffer[5]) << 32;
+                        msglen += ((ulong)data.IncomingBuffer[6]) << 24;
+                        msglen += ((ulong)data.IncomingBuffer[7]) << 16;
+                        msglen += ((ulong)data.IncomingBuffer[8]) << 8;
+                        msglen += ((ulong)data.IncomingBuffer[9]);
+                        offset += 8;
+                    }
+
+                    if ((ulong)data.IncomingBufferLength < msglen + offset)
+                        break; // Not enough data yet
+
+                    if (mask && msglen > 0)
+                    {
+                        byte[] masks = new byte[4] { data.IncomingBuffer[offset], data.IncomingBuffer[offset + 1], data.IncomingBuffer[offset + 2], data.IncomingBuffer[offset + 3] };
+                        offset += 4;
+
+                        if ((ulong)data.IncomingBufferLength < msglen + offset)
+                            break; // Not enough data yet
+
+                        for (ulong i = 0; i < msglen; i++)
+                            data.IncomingBuffer[offset + i] = (byte)(data.IncomingBuffer[offset + i] ^ masks[i % 4]);
+                    }
+
+                    // TODO: Support fin
+                    if (!fin)
+                    {
+                        // TODO
+                    }
+                    else
+                    {
+                        // Got all data in offset, with msglen
+                        if (opcode == 0x09) // ping
+                        {
+                            data.SendWebsocketMessage(0x0A, data.IncomingBuffer, offset, msglen);
+                        }
+                        else if (opcode == 0x01 || opcode == 0x02) // 0x01 text or 0x02 binary
+                        {
+                            data.WebsocketFrameHandler(data, (byte)opcode, data.IncomingBuffer, offset, msglen);
+                        }
+                        else if (opcode == 0x08) // closing
+                        {
+                            // TODO, body contents is reason of closing
+                            // Just echo for now
+                            data.SendWebsocketMessage(0x08, data.IncomingBuffer, offset, msglen);
+                        }
+                    }
+
+                    // Message handled, remove from buffer
+                    Buffer.BlockCopy(data.IncomingBuffer, (int)(offset + msglen), data.IncomingBuffer, 0, data.IncomingBufferLength - (int)(msglen + offset));
+                    data.IncomingBufferLength -= (int)(msglen + offset);
+                    continue;
+                }
+
                 if (data.RequestRaw == null)
                 {
                     if (data.IncomingBufferLength <= 2)
@@ -566,9 +652,9 @@ namespace Comgenie.Server.Handlers
                                         var skipFileData = false;
                                         string fileName = null;
                                         // See if this is a form element, or a file upload
-                                        if (headers.ContainsKey("Content-Disposition"))
+                                        if (headers.ContainsKey("content-disposition"))
                                         {
-                                            var headerValue = headers["Content-Disposition"];
+                                            var headerValue = headers["content-disposition"];
                                             var formFieldName = Between(headerValue, "name=\"", "\"");
                                             if (formFieldName != null)
                                             {
@@ -735,6 +821,39 @@ namespace Comgenie.Server.Handlers
                         };
                     }
                 }
+                else if (route.WebsocketReceiveHandler != null)
+                {
+                    // Websocket route, see if the request is actually meant for a websocket 
+                    if (data.Headers.ContainsKey("sec-websocket-key"))
+                    {
+                        // Send a special response
+                        var accept = Convert.ToBase64String(System.Security.Cryptography.SHA1.Create().ComputeHash(Encoding.UTF8.GetBytes(data.Headers["sec-websocket-key"] + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")));
+                        response = new HttpResponse()
+                        {
+                            StatusCode = 101,
+                            Headers = new Dictionary<string, string>()
+                            {
+                                { "Upgrade", "websocket" },
+                                { "Connection", "Upgrade" },
+                                { "Sec-WebSocket-Accept", accept }
+                            }
+                        };
+                        //if (route.WebsocketConnectHandler != null) 
+                        //    route.WebsocketConnectHandler(data); TODO, call this one after our response has been sent
+                        data.WebsocketFrameHandler = route.WebsocketReceiveHandler;
+                        data.WebsocketDisconnectedHandler = route.WebsocketDisconnectHandler;
+                    }
+                    else
+                    {
+                        response = new HttpResponse()
+                        {
+                            StatusCode = 400,
+                            ContentType = "text/plain",
+                            Data = ASCIIEncoding.UTF8.GetBytes("Invalid websocket request")
+                        };
+                    }
+
+                }
             }
 
             if (response == null)
@@ -822,6 +941,13 @@ namespace Comgenie.Server.Handlers
             else
             {
                 client.SendData(tmpResponseHeader, 0, tmpResponseHeader.Length); // Empty
+            }
+
+
+            if (data.WebsocketFrameHandler != null && route != null && route.WebsocketConnectHandler != null)
+            {
+                // This request is upgraded to a websocket connection, execute callback handler
+                route.WebsocketConnectHandler(data);
             }
         }
         private string Between(string txt, string start, string end)
@@ -946,6 +1072,15 @@ namespace Comgenie.Server.Handlers
                 });
             }            
         }
+        public void AddWebsocketRoute(string domain, string path, Action<HttpClientData, byte, byte[], ulong, ulong> messageReceivedHandler, Action<HttpClientData> connectHandler=null, Action<HttpClientData> disconnectHandler = null)
+        {
+            AddRoute(domain, path, new Route()
+            {
+                WebsocketConnectHandler = connectHandler,
+                WebsocketReceiveHandler = messageReceivedHandler,
+                WebsocketDisconnectHandler = disconnectHandler
+            });
+        }
         internal void AddCustomRoute(string domain, string path, Action<Client, HttpClientData> handleCallback)
         {            
             AddRoute(domain, path, new Route()
@@ -987,8 +1122,10 @@ namespace Comgenie.Server.Handlers
             public Func<string, string, string, string> ProxyInterceptHandler { get; set; } // string NewContent(requestPath, responseHeaders, responseContent)
             public MethodInfo ApplicationMethod { get; set; }
             public ParameterInfo[] ApplicationMethodParameters { get; set; }
-
-            public Action<Client, HttpClientData> CustomHandler { get; set; }
+            public Action<Client, HttpClientData> CustomHandler { get; set; }            
+            public Action<HttpClientData> WebsocketConnectHandler { get; set; }
+            public Action<HttpClientData, byte, byte[], ulong, ulong> WebsocketReceiveHandler { get; set; }
+            public Action<HttpClientData> WebsocketDisconnectHandler { get; set; }
         }
 
         public class HttpClientData
@@ -1011,6 +1148,8 @@ namespace Comgenie.Server.Handlers
             public string DataTempFileName { get; set; }
             public int DataLength { get; set; }
             public List<HttpClientFileData> FileData { get; set; }
+            public Action<HttpClientData, byte, byte[], ulong, ulong> WebsocketFrameHandler { get; set; }
+            public Action<HttpClientData> WebsocketDisconnectedHandler { get; set; }
             public string CookieValue(string cookieName)
             {
                 foreach (var header in FullRawHeaders)
@@ -1029,7 +1168,51 @@ namespace Comgenie.Server.Handlers
                 return null;
             }
 
-        }
+            public void SendWebsocketMessage(byte opcode, byte[] data, ulong offset, ulong len)
+            {
+                if (WebsocketFrameHandler == null)
+                    return;
+                byte[] header;
+                if (len < 126)
+                {
+                    header = new byte[2];
+                    header[1] = (byte)len; 
+                }
+                else if (len < 65536)
+                {
+                    header = new byte[4];                    
+                    header[0] |= 0b10000000; // set fin flag
+                    header[1] = 126;
+                    header[2] = (byte)(len >> 8);
+                    header[3] = (byte)len;
+                }
+                else
+                {
+                    header = new byte[10];
+                    header[0] |= 0b10000000; // set fin flag
+                    header[1] = 127;
+                    header[2] = (byte)(len >> 56);
+                    header[3] = (byte)(len >> 48);
+                    header[4] = (byte)(len >> 40);
+                    header[5] = (byte)(len >> 32);
+                    header[6] = (byte)(len >> 24);
+                    header[7] = (byte)(len >> 16);
+                    header[8] = (byte)(len >> 8);
+                    header[9] = (byte)(len);
+                }
+
+                header[0] = opcode;
+                header[0] |= 0b10000000; // set fin flag
+
+                Client.SendData(header, 0, header.Length, false);
+                Client.SendData(data, (int)offset, (int)len, true);
+            }
+            public void SendWebsocketMessage(byte opcode, byte[] data)
+            {
+                SendWebsocketMessage(opcode, data, 0, (ulong)data.Length);
+            }
+        }        
+
         public class HttpClientFileData
         {
             public Dictionary<string, string> Headers { get; set; }

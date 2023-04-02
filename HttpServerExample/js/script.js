@@ -1,5 +1,12 @@
 ﻿
+var addMessage = function (message) {
+    var div = document.createElement("DIV");
+    div.innerText = message;
+    document.body.appendChild(div);
+};
+
 window.addEventListener("load", function () {
+    // Application route examples
     fetch("/app/ReverseText", {
         method: "POST",
         headers: {
@@ -9,9 +16,7 @@ window.addEventListener("load", function () {
     })
         .then(response => response.text())
         .then(response => {
-            var div = document.createElement("DIV");
-            div.innerText = "Reverse text response: " + response;
-            document.body.appendChild(div);
+            addMessage("Reverse text response: " + response);
         });
 
     fetch("/app/TimesTwo", {
@@ -23,8 +28,23 @@ window.addEventListener("load", function () {
     })
         .then(response => response.text())
         .then(response => {
-            var div = document.createElement("DIV");
-            div.innerText = "Times Two response: " + response;
-            document.body.appendChild(div);
+            addMessage("Times Two response: " + response);
         });
+
+    // Websocket route example
+    var prefix = window.location.origin.replace(/^http/, 'ws');
+    var ws = new WebSocket(prefix + "/websocket");
+    ws.onopen = function (e) {
+        addMessage("Websocket opened");
+        ws.send("Test message send to websocket");
+    };
+    ws.onmessage = (e) => {
+        addMessage("Websocket response: " + e.data);
+    };
+    ws.onerror = function (e) {
+        addMessage("Websocket error: " + e.data);
+    };
+    ws.onclose = function (e) {
+        addMessage("Websocket closed");
+    };
 });
