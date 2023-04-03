@@ -383,16 +383,6 @@ namespace Comgenie.Server.Handlers
             var parameterStart = data.Request.IndexOf("?");
             data.RequestPage = parameterStart > 0 ? data.Request.Substring(0, parameterStart) : data.Request;
 
-            var lowerRequest = data.RequestPage.ToLower();
-            if (lowerRequest.Contains("admin") || lowerRequest.Contains(".php") || lowerRequest.Contains("eval") || lowerRequest.Contains(".cgi") || lowerRequest.Contains("http:") || lowerRequest.Contains("../.."))
-            {                
-                Server.IPBanList.Add(client.RemoteAddress);
-                Server.SaveBanList();
-                Log.Warning(nameof(HttpHandler), "Added " + client.RemoteAddress + " to ban list, total banned count: " + Server.IPBanList.Count);                
-                client.Disconnect();
-                return;
-            }
-
             // All data received, we can respond!
             Route route = null;
             var routeKey = data.Host + data.RequestPage;

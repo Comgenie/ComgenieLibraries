@@ -12,9 +12,10 @@ The http server has the following features:
 - Application routes similar to controllers in ASP.Net MVC
 - Reverse proxy including response manipulation
 - Support for hosting a second instance remotely and adding routes/handling requests of the main instance
+- Websockets
 
 The smtp server has the following features:
 
-- DKIM and SPF verification
+- DKIM verification
 - Utility to send DKIM signed email
 - StartTLS
