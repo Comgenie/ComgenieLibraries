@@ -35,7 +35,7 @@ namespace StorageExample
                 await sp.AddStorageLocationAsync(new DiskStorageLocation(".\\folder-1"), Encoding.UTF8.GetBytes("encryption key"));
 
                 // folder-2 is a backup storage which we use to sync changes to and from
-                // by setting the syncInterval to at least 60, this location can be used by multiple clients at the same time (a lock mechanism will be used)
+                // by setting the shared setting to true, this location can be used by multiple clients at the same time (a lock mechanism will be used)
                 await sp.AddStorageLocationAsync(new DiskStorageLocation(".\\folder-2"), Encoding.UTF8.GetBytes("other key"), syncInterval: 60, shared: false, priority: 2, repairPercent: 25);
 
                 // Azure blob storage location, to test you'll need a SAS url with write access
