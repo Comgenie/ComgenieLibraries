@@ -1,0 +1,7 @@
+﻿The Reed Solomon code in this folder is taken and slightly modified from:
+https://github.com/TanukiSharp/ReedSolomon/
+
+Which is a port of the code distributed by Backblaze at:
+https://github.com/zxing/zxing
+
+The code in this folder is licensed by the Apache License 2.0
