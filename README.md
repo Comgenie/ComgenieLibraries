@@ -19,3 +19,16 @@ The smtp server has the following features:
 - DKIM verification
 - Utility to send DKIM signed email
 - StartTLS
+
+
+## Comgenie.Storage
+A way to set up a storage pool with one or multiple storage locations (Disk, Azure, Anything custom). The library will encrypt and add repair data when storing files, and will automatically repair files when reading them. Note that this library does not create a virtual disk, it just offers a way to open and manipulate files using code.
+Available as [nuget package](https://www.nuget.org/packages/Comgenie.Storage/) .
+
+- Encryption using AES256
+- Repair data using Reed Solomon
+- Support for priority and failover of storage locations
+- Assign and search for files using tags
+- Support for custom storage locations
+- Sync to a shared storage location (can be accessed by multiple instances of the application)
+- The EncryptedAndRepairableStream class can also be used on its own to add encryption and repair data to any stream
