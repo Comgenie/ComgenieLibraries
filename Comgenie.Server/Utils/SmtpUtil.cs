@@ -124,8 +124,17 @@ namespace Comgenie.Server.Utils
 
         public static string GetDKIMSignature(string fromDomain, Stream emlData, string includeHeaders = "From,To,Cc,Subject,Content-Type,Content-Transfer-Encoding,Message-ID,Date")
         {
-            var hash = HashAlgorithm.Create("SHA-256");
+            if (emlData == null)
+                throw new ArgumentException();
+            var hash = SHA256.Create();
+            if (hash == null)
+            {
+                Console.WriteLine("Could not initialize SHA-256 hasher");
+                return null;
+            }
+
             CanonicalizatedBodyStream.ForwardStreamPositionToBody(emlData);
+
             string bodyHash = Convert.ToBase64String(hash.ComputeHash(new CanonicalizatedBodyStream(emlData, true)));
 
             var dkimRsa = GetDkimRsa(fromDomain);
