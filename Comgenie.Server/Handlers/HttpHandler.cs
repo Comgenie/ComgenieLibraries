@@ -31,9 +31,7 @@ namespace Comgenie.Server.Handlers
             client.Data = new HttpClientData()
             {
                 Client = client,
-                IncomingBuffer = new byte[1024*514],
-                Headers = new Dictionary<string, string>(),
-                FullRawHeaders = new List<KeyValuePair<string, string>>()
+                IncomingBuffer = new byte[1024*514]
             };
         }
 
@@ -460,61 +458,10 @@ namespace Comgenie.Server.Handlers
 
                     if (requestedFile != null)
                     {
-                        var fileSize = new FileInfo(requestedFile).Length;
-
-
-                        if (data.Headers.ContainsKey("range") && data.Headers["range"].StartsWith("bytes=") && fileSize > 0)
+                        response = new HttpResponse()
                         {
-                            var bytes = data.Headers["range"].Substring(6).Split('-'); // 0-1023  // Start byte-end byte
-                            long startByte = 0;
-                            long endByte = fileSize - 1;
-                            if (bytes.Length > 1)
-                            {
-                                if (!string.IsNullOrWhiteSpace(bytes[0]))
-                                    startByte = long.Parse(bytes[0]);
-                                if (!string.IsNullOrWhiteSpace(bytes[1]))
-                                    endByte = long.Parse(bytes[1]);
-                            }
-                            if (startByte >= fileSize)
-                                startByte = fileSize - 1;
-                            if (endByte >= fileSize)
-                                endByte = fileSize - 1;
-                            if (startByte > endByte)
-                                startByte = endByte;
-
-                            Log.Debug(nameof(HttpHandler), "Sending response partial: " + startByte + "-" + endByte + "/" + fileSize);
-                            response = new HttpResponse()
-                            {
-                                StatusCode = 206, // Partial
-                                ContentType = (route.ContentType ?? GetContentTypeFromFileName(requestedFile)),
-                                Stream = File.OpenRead(requestedFile),
-                                ContentLengthStream = (endByte - startByte) + 1,
-                                ContentOffsetStream = startByte,
-                                Headers = new Dictionary<string, string>()
-                            };
-
-                            response.Headers.Add("Content-Range", "bytes " + startByte + "-" + endByte + "/" + fileSize);
-                        }
-                        else
-                        {
-                            // Full file
-                            response = new HttpResponse()
-                            {
-                                StatusCode = 200,
-                                ContentType = (route.ContentType ?? GetContentTypeFromFileName(requestedFile)),
-                                Stream = File.OpenRead(requestedFile),
-                                ContentLengthStream = fileSize,
-                                Headers = new Dictionary<string, string>(),
-                                GZipResponse = EnableGZipCompressionExtensions != null && EnableGZipCompressionExtensions.Contains(Path.GetExtension(requestedFile).ToLower())
-                            };
-                            response.Headers.Add("Cache-Control", "public, max-age=86400");
-                        }
-
-                        if (true || fileSize > 1024 * 1024) // 1 MB
-                        {
-                            // Allow  ranges
-                            response.Headers.Add("Accept-Ranges", "bytes");
-                        }
+                            FileName = requestedFile
+                        };
                     }
                 }
                 else if (route.Application != null && route.ApplicationMethod != null) 
@@ -848,7 +795,7 @@ namespace Comgenie.Server.Handlers
                     }
 
                 }
-            }
+            } 
 
             if (response == null)
             {
@@ -860,8 +807,51 @@ namespace Comgenie.Server.Handlers
                 };
             }
 
+            if (response.FileName != null)
+            {
+                var fileSize = new FileInfo(response.FileName).Length;
 
-            if (response.ResponseObject != null)
+                if (data.Headers.ContainsKey("range") && data.Headers["range"].StartsWith("bytes=") && fileSize > 0)
+                {
+                    var bytes = data.Headers["range"].Substring(6).Split('-'); // 0-1023  // Start byte-end byte
+                    long startByte = 0;
+                    long endByte = fileSize - 1;
+                    if (bytes.Length > 1)
+                    {
+                        if (!string.IsNullOrWhiteSpace(bytes[0]))
+                            startByte = long.Parse(bytes[0]);
+                        if (!string.IsNullOrWhiteSpace(bytes[1]))
+                            endByte = long.Parse(bytes[1]);
+                    }
+                    if (startByte >= fileSize)
+                        startByte = fileSize - 1;
+                    if (endByte >= fileSize)
+                        endByte = fileSize - 1;
+                    if (startByte > endByte)
+                        startByte = endByte;
+
+                    Log.Debug(nameof(HttpHandler), "Sending response partial: " + startByte + "-" + endByte + "/" + fileSize);
+                    response.StatusCode = 206; // Partial
+                    response.Stream = File.OpenRead(response.FileName);
+                    response.ContentOffsetStream = startByte;
+                    response.ContentLengthStream = (endByte - startByte) + 1;
+                    response.Headers.Add("Content-Range", "bytes " + startByte + "-" + endByte + "/" + fileSize);
+                }
+                else
+                {
+                    // Full file
+                    response.StatusCode = 200;
+                    response.Stream = File.OpenRead(response.FileName);
+                    response.ContentLengthStream = fileSize;
+                    response.GZipResponse = EnableGZipCompressionExtensions != null && EnableGZipCompressionExtensions.Contains(Path.GetExtension(response.FileName).ToLower());
+                    response.Headers.Add("Cache-Control", "public, max-age=86400");
+                }
+                response.ContentType = (route.ContentType ?? GetContentTypeFromFileName(response.FileName));
+
+                // Allow ranges
+                response.Headers.Add("Accept-Ranges", "bytes");
+            }
+            else if (response.ResponseObject != null)
             {
                 //var testData = JsonSerializer.Serialize(response.ResponseObject);
                 response.Data = ASCIIEncoding.UTF8.GetBytes(JsonSerializer.Serialize(response.ResponseObject));
@@ -879,7 +869,7 @@ namespace Comgenie.Server.Handlers
             }
 
             var codeText = ((System.Net.HttpStatusCode)response.StatusCode).ToString();
-            
+
             StringBuilder sb = new StringBuilder();
             sb.AppendLine("HTTP/1.1 " + response.StatusCode + " " + codeText);
             if (response.ContentType != "")
@@ -1054,7 +1044,7 @@ namespace Comgenie.Server.Handlers
         public void AddApplicationRoute(string domain, string path, object httpApplication, bool lowerCaseMethods=true)
         {
             // Add all methods of the given httpApplication class as seperate routes. The 'Other' method will be used if no suitable methods are found for a request.
-            var publicMethods = httpApplication.GetType().GetMethods(BindingFlags.Public| BindingFlags.Instance | BindingFlags.DeclaredOnly);
+            var publicMethods = httpApplication.GetType().GetMethods(BindingFlags.Public| BindingFlags.Instance);
             foreach (var method in publicMethods)
             {
                 if (method.ReturnType != typeof(HttpResponse))
@@ -1127,13 +1117,13 @@ namespace Comgenie.Server.Handlers
         {
             public Client Client { get; set; }
             public string Method { get; set; }
-            public string RequestRaw { get; set; }
-            public string Request { get; set; }
-            public string RequestPage { get; set; }
-            public string RequestPageShort { get; set; }
+            public string RequestRaw { get; set; } // Full undecoded request ( starts with / ) 
+            public string Request { get; set; } // Full decoded request ( starts with / )
+            public string RequestPage { get; set; } // Request without the query string parameters
+            public string RequestPageShort { get; set; } // RequestPage without the route prefix
             public string Host { get; set; }
-            public Dictionary<string, string> Headers { get; set; }
-            public List<KeyValuePair<string, string>> FullRawHeaders { get; set; } // Includes duplicates of header keys
+            public Dictionary<string, string> Headers { get; set; } = new Dictionary<string, string>();
+            public List<KeyValuePair<string, string>> FullRawHeaders { get; set; } = new List<KeyValuePair<string, string>>(); // Includes duplicates of header keys
             public int ContentLength { get; set; }
             public byte[] IncomingBuffer { get; set; }
             public int IncomingBufferLength { get; set; }
@@ -1233,9 +1223,10 @@ namespace Comgenie.Server.Handlers
         {
             public int StatusCode { get; set; }
             public string ContentType { get; set; }
-            public Dictionary<string, string> Headers { get; set; }
+            public Dictionary<string, string> Headers { get; set; } = new Dictionary<string, string>();
 
-            // Data or Stream or object (json)
+            // File, Data or Stream or object (json)
+            public string FileName { get; set; }
             public byte[] Data { get; set; }
             public Stream Stream { get; set; }
             public long ContentLengthStream { get; set; } = -1;

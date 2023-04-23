@@ -13,6 +13,8 @@ The http server has the following features:
 - Reverse proxy including response manipulation
 - Support for hosting a second instance remotely and adding routes/handling requests of the main instance
 - Websockets
+- Abstract WebDAV class to easily create a custom WebDAV server
+- See the HttpServerExample project for examples for most of the features listed above
 
 The smtp server has the following features:
 
@@ -32,3 +34,4 @@ Available as [nuget package](https://www.nuget.org/packages/Comgenie.Storage/) .
 - Support for custom storage locations
 - Sync to a shared storage location (can be accessed by multiple instances of the application)
 - The EncryptedAndRepairableStream class can also be used on its own to add encryption and repair data to any stream
+- See the StorageExample project for examples for most of the features listed above

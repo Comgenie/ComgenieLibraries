@@ -328,6 +328,7 @@ namespace Comgenie.Server
             
             var ssl = new SslStream(client.NetworkStream, false);
             client.Stream = ssl;
+            client.StreamIsEncrypted = true;
 
             var myTask = Task.Run(() =>
             {

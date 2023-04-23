@@ -8,7 +8,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Comgenie.Server
+namespace Comgenie.Server.Utils
 {
     public class SharedTcpClient : IDisposable
     {
@@ -19,19 +19,20 @@ namespace Comgenie.Server
         private static int InstanceCount = 0;
         public int CurrentInstanceNumber = 0;
 
-        public SharedTcpClient(string host, int port, bool ssl, int closeAfterSeconds=60)
+        public SharedTcpClient(string host, int port, bool ssl, int closeAfterSeconds = 60)
         {
             CurrentInstanceNumber = ++InstanceCount;
             // Check if there is any open connection to reuse            
 
             List<OpenConnection> expiredConnections = null;
             Log.Debug(nameof(SharedTcpClient), CurrentInstanceNumber + " Before lock");
-            
-            lock (ExistingConnections) {
+
+            lock (ExistingConnections)
+            {
                 // Remove expired connections
                 Log.Debug(nameof(SharedTcpClient), CurrentInstanceNumber + " Removing expired connections (part 1)");
-                
-                expiredConnections = ExistingConnections.Where(a => !a.InUse && a.LastActivity.AddSeconds(a.CloseAfterSeconds) < DateTime.UtcNow).ToList();                
+
+                expiredConnections = ExistingConnections.Where(a => !a.InUse && a.LastActivity.AddSeconds(a.CloseAfterSeconds) < DateTime.UtcNow).ToList();
                 ExistingConnections = ExistingConnections.Where(a => !expiredConnections.Contains(a)).ToList();
 
                 // Find an existing connection
@@ -84,8 +85,8 @@ namespace Comgenie.Server
 
             lock (ExistingConnections)
                 ExistingConnections.Add(Connection);
-        }        
-        
+        }
+
         public void Dispose()
         {
             // If the connection is still open, mark as available
@@ -99,7 +100,7 @@ namespace Comgenie.Server
                 // If not, remove from the existing connections
                 lock (ExistingConnections)
                     ExistingConnections.Remove(Connection);
-            }            
+            }
         }
 
         public class OpenConnection
@@ -123,16 +124,16 @@ namespace Comgenie.Server
         {
             var uri = new Uri(url);
             Log.Debug(nameof(SharedTcpClient), "Get shared client for " + uri.Host);
-            var client = new SharedTcpClient(uri.Host, uri.Port, uri.Port == 443);            
+            var client = new SharedTcpClient(uri.Host, uri.Port, uri.Port == 443);
             client.Connection.CanReuse = false;
             Log.Debug(nameof(SharedTcpClient), "Send headers");
-            client.Connection.Stream.Write(ASCIIEncoding.ASCII.GetBytes(requestHeaders));
+            client.Connection.Stream.Write(Encoding.ASCII.GetBytes(requestHeaders));
             if (requestContent != null)
                 requestContent.CopyTo(client.Connection.Stream);
             Log.Debug(nameof(SharedTcpClient), "Before flush");
             client.Connection.Stream.Flush();
             Log.Debug(nameof(SharedTcpClient), "After flush");
-            return new SingleHttpResponseStream(client);                            
+            return new SingleHttpResponseStream(client);
         }
 
         public class SingleHttpResponseStream : Stream
@@ -142,11 +143,11 @@ namespace Comgenie.Server
             public string ResponseHeaders { get; set; }
             private long CurrentContentLength { get; set; }
             private long CurrentDataPos { get; set; }
-            private bool TransferEncodingChunked { get; set; }            
+            private bool TransferEncodingChunked { get; set; }
             public bool IncludeChunkedHeadersInResponse { get; set; }
             public SingleHttpResponseStream(SharedTcpClient sharedTcpClient)
             {
-                this.Client = sharedTcpClient;
+                Client = sharedTcpClient;
 
                 // Get response headers
                 var responseHeader = new StringBuilder();
@@ -232,7 +233,7 @@ namespace Comgenie.Server
                     {
                         // Full
                         curLen = ReadFirstBuffer.Length - ReadFirstBufferIndex;
-                        Buffer.BlockCopy(ReadFirstBuffer, ReadFirstBufferIndex, buffer, offset, ReadFirstBuffer.Length - ReadFirstBufferIndex);                        
+                        Buffer.BlockCopy(ReadFirstBuffer, ReadFirstBufferIndex, buffer, offset, ReadFirstBuffer.Length - ReadFirstBufferIndex);
                     }
                     else
                     {
@@ -255,7 +256,7 @@ namespace Comgenie.Server
 
                 if (CurrentContentLength == 0)
                     return 0;
-                
+
                 if (CurrentContentLength < 0 && TransferEncodingChunked) // Read the first content length line (12AB\r\n) or any of the next content length lines (\r\n12AB\r\n)
                 {
                     // TODO: Keep an internal buffer so we don't have to read bytes 1 at the time
@@ -290,7 +291,7 @@ namespace Comgenie.Server
                         Client.Connection.Socket.Close();
                         return 0;
                     }
-                    
+
                     var contentLengthStr = contentLength.ToString();
                     long contentLengthLong = 0;
                     try
@@ -306,19 +307,19 @@ namespace Comgenie.Server
                     }
 
                     CurrentContentLength = contentLengthLong;
-                    CurrentDataPos = 0;                    
+                    CurrentDataPos = 0;
 
                     if (contentLengthLong == 0)
-                    {                        
+                    {
                         // Content is might be ended, it might end with some trailing enters, but when there is a white-line, its actually ended
-                        for (var i=0;i<2;i++)
+                        for (var i = 0; i < 2; i++)
                             fullBytes.Add((byte)Client.Connection.Stream.ReadByte());
 
                         if (fullBytes[fullBytes.Count - 2] != '\r' && fullBytes[fullBytes.Count - 1] != '\n') // Not ended
                         {
                             Log.Info(nameof(SingleHttpResponseStream), "Actually not ended...");
                         }
-                        
+
                         if (!IncludeChunkedHeadersInResponse)
                             return 0;
                     }
@@ -374,9 +375,9 @@ namespace Comgenie.Server
                 // If all data has been read, the CurrentContentLength will be 0
                 // During invalid responses the socket will be closed and it won't be reused anyway
                 if (CurrentContentLength == 0)
-                    this.Client.Connection.CanReuse = true; 
+                    Client.Connection.CanReuse = true;
 
-                Client.Dispose();                
+                Client.Dispose();
             }
 
             // Unused
@@ -385,10 +386,10 @@ namespace Comgenie.Server
                 return 0;
             }
             public override void SetLength(long value) { }
-            public override void Write(byte[] buffer, int offset, int count) {}
+            public override void Write(byte[] buffer, int offset, int count) { }
             public override void Flush() { }
         }
     }
 
-    
+
 }

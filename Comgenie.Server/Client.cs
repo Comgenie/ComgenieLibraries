@@ -18,6 +18,7 @@ namespace Comgenie.Server
         public CancellationTokenSource StreamReadingCancellationTokenSource { get; set; }
         public Action CancellationCallBack = null;
         public bool StreamIsReady { get; set; }
+        public bool StreamIsEncrypted { get; set; }
         public NetworkStream NetworkStream { get; set; }
         public IConnectionHandler Handler { get; set; }
         public int MaxProcessingCount { get; set; }
