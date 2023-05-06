@@ -400,7 +400,7 @@ namespace Comgenie.Server.Utils
                     var writer = new StreamWriter(stream, ASCIIEncoding.ASCII) { AutoFlush = true, NewLine = "\r\n" };
                     var reader = new StreamReader(stream, ASCIIEncoding.ASCII);
 
-                    var banner = reader.ReadLine();
+                    var banner = ReadAll(reader, "220");
                     Console.WriteLine("SMTP Banner: " + banner);
 
                     writer.WriteLine("EHLO " + (string.IsNullOrEmpty(customEhlo) ? fromDomain : customEhlo));
