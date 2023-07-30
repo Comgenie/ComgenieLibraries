@@ -137,7 +137,7 @@ namespace Comgenie.Server
             listenSocket.Bind(new IPEndPoint(IPAddress.Any, port));
             listenSocket.Listen(1024);
 
-            if (handler is SmtpHandler)
+            if (handler is SmtpHandler || handler is ImapHandler)
                 maxProcessingQueue = 1; // We have to stop any NetworkStream reads while handling commands, otherwise STARTTLS cannot work in C#
 
             Handlers.Add(listenSocket, new ServerProtocol()
