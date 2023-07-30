@@ -14,6 +14,7 @@ namespace Comgenie.Server.Utils
     {
         private const bool Debug = false;
         private static List<OpenConnection> ExistingConnections = new List<OpenConnection>();
+        private static object ExistingConnectionsLockObj = new object();
 
         public OpenConnection Connection = null;
         private static int InstanceCount = 0;
@@ -27,7 +28,7 @@ namespace Comgenie.Server.Utils
             List<OpenConnection> expiredConnections = null;
             Log.Debug(nameof(SharedTcpClient), CurrentInstanceNumber + " Before lock");
 
-            lock (ExistingConnections)
+            lock (ExistingConnectionsLockObj)
             {
                 // Remove expired connections
                 Log.Debug(nameof(SharedTcpClient), CurrentInstanceNumber + " Removing expired connections (part 1)");
@@ -48,7 +49,19 @@ namespace Comgenie.Server.Utils
 
             Log.Debug(nameof(SharedTcpClient), CurrentInstanceNumber + " Removing expired connections (part 2)");
             foreach (var expiredConnection in expiredConnections)
-                expiredConnection.Stream.Close(); // Also closes the socket
+            {
+                try
+                {
+                    expiredConnection.Stream.Dispose(); // Should also close the socket
+                }
+                catch { }
+
+                try
+                {
+                    expiredConnection.Socket.Dispose();
+                }
+                catch { }
+            }
 
             if (Connection != null)
             {
@@ -59,37 +72,53 @@ namespace Comgenie.Server.Utils
             // Create a new connection
             Log.Debug(nameof(SharedTcpClient), CurrentInstanceNumber + " Create socket");
             var socket = new Socket(SocketType.Stream, ProtocolType.Tcp);
-            Log.Debug(nameof(SharedTcpClient), CurrentInstanceNumber + " Before connect");
-            socket.Connect(host, port);
-            Log.Debug(nameof(SharedTcpClient), CurrentInstanceNumber + " After connect");
-            Stream stream = new NetworkStream(socket, true);
-            if (ssl)
+            try
             {
-                Log.Debug(nameof(SharedTcpClient), CurrentInstanceNumber + " Before ssl stream auth");
-                stream = new SslStream(stream, false);
-                ((SslStream)stream).AuthenticateAsClient(host);
-                Log.Debug(nameof(SharedTcpClient), CurrentInstanceNumber + " After ssl stream auth");
+                Log.Debug(nameof(SharedTcpClient), CurrentInstanceNumber + " Before connect");
+                socket.Connect(host, port);
+                Log.Debug(nameof(SharedTcpClient), CurrentInstanceNumber + " After connect");
+                Stream stream = new NetworkStream(socket, true);
+                if (ssl)
+                {
+                    Log.Debug(nameof(SharedTcpClient), CurrentInstanceNumber + " Before ssl stream auth");
+                    stream = new SslStream(stream, false);
+                    ((SslStream)stream).AuthenticateAsClient(host);
+                    Log.Debug(nameof(SharedTcpClient), CurrentInstanceNumber + " After ssl stream auth");
+                }
+
+                Connection = new OpenConnection()
+                {
+                    Host = host,
+                    Port = port,
+                    Ssl = ssl,
+                    CloseAfterSeconds = closeAfterSeconds,
+                    InUse = true,
+                    LastActivity = DateTime.UtcNow,
+                    Socket = socket,
+                    Stream = stream
+                };
+
+                lock (ExistingConnectionsLockObj)
+                    ExistingConnections.Add(Connection);
             }
-
-            Connection = new OpenConnection()
+            catch (Exception ex)
             {
-                Host = host,
-                Port = port,
-                Ssl = ssl,
-                CloseAfterSeconds = closeAfterSeconds,
-                InUse = true,
-                LastActivity = DateTime.UtcNow,
-                Socket = socket,
-                Stream = stream
-            };
+                Log.Warning(nameof(SharedTcpClient), CurrentInstanceNumber + " Could not connect to " + host+ ":"+port +", " + ex.Message);
+                try
+                {
+                    socket.Dispose();
+                } catch {}
 
-            lock (ExistingConnections)
-                ExistingConnections.Add(Connection);
+                throw;
+            }
         }
 
         public void Dispose()
         {
             // If the connection is still open, mark as available
+            if (Connection == null)
+                return;
+
             if (Connection.CanReuse && Connection.Socket.Connected)
             {
                 Connection.LastActivity = DateTime.UtcNow;
@@ -98,8 +127,20 @@ namespace Comgenie.Server.Utils
             else
             {
                 // If not, remove from the existing connections
-                lock (ExistingConnections)
+                lock (ExistingConnectionsLockObj)
                     ExistingConnections.Remove(Connection);
+
+                try
+                {
+                    Connection.Stream.Dispose();
+                }
+                catch { }
+
+                try
+                {
+                    Connection.Socket.Dispose();
+                }
+                catch { }
             }
         }
 
@@ -136,7 +177,7 @@ namespace Comgenie.Server.Utils
             return new SingleHttpResponseStream(client);
         }
 
-        public class SingleHttpResponseStream : Stream
+        public class SingleHttpResponseStream : Stream, IDisposable
         {
             private SharedTcpClient Client { get; set; }
             //public string RequestHeaders { get; set; }
@@ -368,16 +409,16 @@ namespace Comgenie.Server.Utils
                 return len;
             }
 
-            public new void Dispose()
+            protected override void Dispose(bool disposing)
             {
-                base.Dispose();
-
                 // If all data has been read, the CurrentContentLength will be 0
                 // During invalid responses the socket will be closed and it won't be reused anyway
                 if (CurrentContentLength == 0)
                     Client.Connection.CanReuse = true;
 
                 Client.Dispose();
+
+                base.Dispose(disposing);
             }
 
             // Unused
