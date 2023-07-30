@@ -52,20 +52,37 @@ namespace Comgenie.Server.Handlers
                 ProcessIncomingEmail(client);                
             }
         }
-        private Func<string, bool> checkMailboxCallback = null;
-        private Func<string, string, bool> checkAuthCallback = null;
-        private Action<SmtpClientData> incomingEmailCallback = null;
-        public void SetIncomingEmailCallback(Action<SmtpClientData> callBack)
+        private Func<SmtpClientData, string, bool> MailboxCheckCallBack = null;
+        private Func<SmtpClientData, string, string, bool> AuthenticationCallBack = null;
+        private Action<SmtpClientData> IncomingEmailCallBack = null;
+
+        /// <summary>
+        /// Whenever an email is successfully received from the client, this callback will be triggered.
+        /// </summary>
+        /// <param name="incomingMailCallBack">Action expecting (SmtpClientData clientData) containing all information about the connected client, and the received email.</param>
+        public void SetIncomingEmailCallBack(Action<SmtpClientData> incomingMailCallBack)
         {
-            incomingEmailCallback = callBack;
+            IncomingEmailCallBack = incomingMailCallBack;
         }
-        public void SetInboxCheckCallback(Func<string, bool> callBack)
+
+        /// <summary>
+        /// Set the function used to check if a mailbox can receive email. This callback is triggered whenever a RCPT command is received.
+        /// The mailbox will always be in lowercase, and will just contain the email address without < > brackets or name.
+        /// </summary>
+        /// <param name="checkMailboxCallBack">Function expecting (SmtpClientData clientData, string mailbox) and returning bool isValid</param>
+        public void SetMailboxCheckCallBack(Func<SmtpClientData, string, bool> checkMailboxCallBack)
         {
-            checkMailboxCallback = callBack;
+            MailboxCheckCallBack = checkMailboxCallBack;
         }
-        public void SetAuthenticationCheckCallback(Func<string, string, bool> callBack) 
+
+        /// <summary>
+        /// Set a function to handle the authentication check. 
+        /// An username and password will be provided and the function should return true if the authentication details are correct
+        /// </summary>
+        /// <param name="authenticationCallBack">Function expecting (SmtpClientData clientData, string username, string password) and returning bool isValid</param>
+        public void SetAuthenticationCheckCallBack(Func<SmtpClientData, string, string, bool> authenticationCallBack) 
         {
-            checkAuthCallback = callBack;
+            AuthenticationCallBack = authenticationCallBack;
         }
 
 
@@ -153,8 +170,8 @@ namespace Comgenie.Server.Handlers
                 // TODO
             }
 
-            if (incomingEmailCallback != null)
-                incomingEmailCallback(data);
+            if (IncomingEmailCallBack != null)
+                IncomingEmailCallBack(data);
         }
 
         public void ClientReceiveData(Client client, byte[] buffer, int len)
@@ -248,7 +265,7 @@ namespace Comgenie.Server.Handlers
                         {
                             data.SmtpAuthPassword = ASCIIEncoding.ASCII.GetString(Convert.FromBase64String(line));
                                                         
-                            if (checkAuthCallback != null && checkAuthCallback(data.SmtpAuthUsername, data.SmtpAuthPassword))
+                            if (AuthenticationCallBack != null && AuthenticationCallBack(data, data.SmtpAuthUsername, data.SmtpAuthPassword))
                             {
                                 data.IsAuthenticated = true;
                                 client.SendString("235 2.7.0 Authentication successful\r\n");    
@@ -265,7 +282,7 @@ namespace Comgenie.Server.Handlers
                     {
                         line = ASCIIEncoding.ASCII.GetString(Convert.FromBase64String(line));
                         parts = line.Split('\0');
-                        if (parts.Length == 3 && checkAuthCallback != null && checkAuthCallback(parts[0], parts[1]))
+                        if (parts.Length == 3 && AuthenticationCallBack != null && AuthenticationCallBack(data, parts[0], parts[1]))
                         {
                             data.SmtpAuthUsername = parts[0];
                             data.SmtpAuthPassword = parts[1];
@@ -292,7 +309,7 @@ namespace Comgenie.Server.Handlers
                     data.HeloInfo = parts[1] + " [" + client.RemoteAddress + "]";
                     Console.WriteLine("Sending EHLO response");
                     var extensionExtras = "";
-                    if (checkAuthCallback != null)
+                    if (AuthenticationCallBack != null)
                         extensionExtras += "250-AUTH LOGIN PLAIN\r\n";
                     if (EnableStartTLS)
                         extensionExtras += "250-STARTTLS\r\n";
@@ -330,8 +347,8 @@ namespace Comgenie.Server.Handlers
                     var approved = false;
                     if (mailBox != null)
                     {
-                        if (checkMailboxCallback != null) // Custom handler 
-                            approved = checkMailboxCallback(mailBox);
+                        if (MailboxCheckCallBack != null) // Custom handler 
+                            approved = MailboxCheckCallBack(data, mailBox);
                         else if (data.IsAuthenticated)
                             approved = true; // Allow relay when authenticated
                         else // By default accept all registered domains 
@@ -371,7 +388,7 @@ namespace Comgenie.Server.Handlers
                     data.SmtpAuthMethod = null;
                     data.IsAuthenticated = false;
 
-                    if (checkAuthCallback == null)
+                    if (AuthenticationCallBack == null)
                     {
                         // Not supported and used yet, so any attempt is a h4x0r
                         Log.Warning(nameof(SmtpHandler), "Added " + client.RemoteAddress + " to ban list");
@@ -391,7 +408,7 @@ namespace Comgenie.Server.Handlers
                     {
                         line = ASCIIEncoding.ASCII.GetString(Convert.FromBase64String(parts[1].Substring(6)));
                         parts = line.Split('\0');
-                        if (parts.Length == 3 && checkAuthCallback != null && checkAuthCallback(parts[0], parts[1]))
+                        if (parts.Length == 3 && AuthenticationCallBack != null && AuthenticationCallBack(data, parts[0], parts[1]))
                         {
                             data.SmtpAuthUsername = parts[0];
                             data.SmtpAuthPassword = parts[1];
