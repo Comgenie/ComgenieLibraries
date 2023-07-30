@@ -24,7 +24,7 @@ namespace Comgenie.Server.Handlers
         private List<Action<HttpClientData, HttpResponse>> PostProcessors = null;
 
         // Enable GZip compression for static text files 
-        public string[] EnableGZipCompressionExtensions = new string[] { ".txt", ".json", ".js", ".html", ".svg", ".css" };
+        public string[] EnableGZipCompressionContentTypes = new string[] { "text/plain", "application/json", "text/html", "image/svg+xml", "application/xml", "text/css", "text/javascript" };
 
         public void ClientConnect(Client client)
         {
@@ -431,8 +431,8 @@ namespace Comgenie.Server.Handlers
                         }
 
                         // First check against escaping the content folder
-                        while (data.RequestPageShort.Contains(".."))
-                            data.RequestPageShort = data.RequestPageShort.Replace("..", "");
+                        while (data.RequestPageShort.Contains("../") || data.RequestPageShort.Contains("..\\"))
+                            data.RequestPageShort = data.RequestPageShort.Replace("../", "").Replace("..\\", "");
 
                         var requestedLocalPath = Path.Combine(route.LocalPath, data.RequestPageShort);
 
@@ -702,7 +702,7 @@ namespace Comgenie.Server.Handlers
                         StringBuilder request = new StringBuilder();
                         request.AppendLine(data.Method + " /"+ data.RequestRaw.Substring(tmpRoutePrefix.Length + 1) + " HTTP/1.1"); // TODO: Remove any folder in our routing path
                         request.AppendLine("Host: " + new Uri(route.Proxy).Host);
-                        foreach (var requestHeader in data.FullRawHeaders)
+                        foreach (var requestHeader in data.FullRawHeaders.ToList())
                         {
                             if (requestHeader.Key == "Host")
                                 continue;
@@ -738,11 +738,12 @@ namespace Comgenie.Server.Handlers
                     }
                     catch (Exception e)
                     {
+                        Console.WriteLine(e.Message + "\r\n" + e.StackTrace);
                         response = new HttpResponse()
                         {
                             StatusCode = 500,
                             ContentType = "text/plain",
-                            Data = ASCIIEncoding.UTF8.GetBytes("Proxy error: " + e.Message)
+                            Data = ASCIIEncoding.UTF8.GetBytes("Proxy error: " + e.Message + "\r\n" + e.StackTrace)
                         };
                     }
                 }
@@ -843,7 +844,7 @@ namespace Comgenie.Server.Handlers
                     response.StatusCode = 200;
                     response.Stream = File.OpenRead(response.FileName);
                     response.ContentLengthStream = fileSize;
-                    response.GZipResponse = EnableGZipCompressionExtensions != null && EnableGZipCompressionExtensions.Contains(Path.GetExtension(response.FileName).ToLower());
+                    //response.GZipResponse = EnableGZipCompressionContentTypes != null && EnableGZipCompressionContentTypes.Contains(Path.GetExtension(response.FileName).ToLower());
                     response.Headers.Add("Cache-Control", "public, max-age=86400");
                 }
                 response.ContentType = (route.ContentType ?? GetContentTypeFromFileName(response.FileName));
@@ -854,9 +855,23 @@ namespace Comgenie.Server.Handlers
             else if (response.ResponseObject != null)
             {
                 //var testData = JsonSerializer.Serialize(response.ResponseObject);
-                response.Data = ASCIIEncoding.UTF8.GetBytes(JsonSerializer.Serialize(response.ResponseObject));
+                var ms = new MemoryStream();
+                JsonSerializer.Serialize(ms, response.ResponseObject);
+                response.ContentLengthStream = ms.Position;
+                ms.Position = 0;
+
+                response.Data = null;
+                response.Stream = ms;                
+                
+                //response.Data = ASCIIEncoding.UTF8.GetBytes(JsonSerializer.Serialize(response.ResponseObject));
                 if (response.ContentType == null)
                     response.ContentType = "application/json;charset=UTF-8";
+            }
+
+            // Check if we return any content type we want to gzip compress (note that http application may also set this flag)
+            if (!response.GZipResponse && EnableGZipCompressionContentTypes != null && EnableGZipCompressionContentTypes.Any(a => response.ContentType.StartsWith(a)))
+            {
+                response.GZipResponse = true;
             }
 
             if (response.StatusCode == 0)
@@ -875,10 +890,17 @@ namespace Comgenie.Server.Handlers
             if (response.ContentType != "")
                 sb.AppendLine("Content-Type: " + (response.ContentType ?? "text/html"));
 
+
+            // Check if we can actually return the response with gzip compression
             if (response.GZipResponse && data.Headers.ContainsKey("accept-encoding") && data.Headers["accept-encoding"].Contains("gzip") && response.Data == null && response.Stream != null)
             {
+                sb.AppendLine("Content-Encoding: gzip");
                 response.ChunkedResponse = true; // required as we don't know the final transfer content length yet
-                sb.AppendLine("Content-Encoding: gzip");                
+            }
+            else
+            {
+
+                response.GZipResponse = false;
             }
 
             if ((response.ChunkedResponse || response.ContentLengthStream < 0) && response.Data == null && response.Stream != null) {
