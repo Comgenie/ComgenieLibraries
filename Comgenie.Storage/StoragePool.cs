@@ -199,12 +199,15 @@ namespace Comgenie.Storage
 
         private StorageLocationInfo? GetStorageLocationForItem(string itemId, out StorageItem? item)
         {
-            foreach (var location in LocationInfos)
+            if (itemId != null)
             {
-                if (location.Index.Items.ContainsKey(itemId))
+                foreach (var location in LocationInfos)
                 {
-                    item = location.Index.Items[itemId];
-                    return location;
+                    if (location.Index.Items.ContainsKey(itemId))
+                    {
+                        item = location.Index.Items[itemId];
+                        return location;
+                    }
                 }
             }
             item = null;
@@ -255,6 +258,61 @@ namespace Comgenie.Storage
             return false;
         }
 
+        public async Task<bool> RenameAsync(string oldItemId, string newItemId)
+        {
+            var storageLocation = GetStorageLocationForItem(oldItemId, out StorageItem? oldItem);
+            var storageLocationNew = GetStorageLocationForItem(newItemId, out StorageItem? newItem);
+            if (storageLocation == null || oldItem == null || (storageLocationNew != null && newItem.Length >= 0))
+                return false;
+
+            newItem = new StorageItem()
+            {
+                Id = newItemId,
+                Created = oldItem.Created,
+                LastModified = DateTime.UtcNow, // We have to overwrite this as its used for syncing
+                Length = oldItem.Length,
+                Tags = oldItem.Tags.ToList()                
+            };
+            newItem.StorageLocationInfo = storageLocation; // this also adds the tags to the search tree
+            storageLocation.Index.Items[newItemId] = newItem;
+
+            // Set the old item as 'deleted'
+            oldItem.Length = -1;
+            oldItem.LastModified = DateTime.UtcNow;
+
+            // Rename physical file
+            var fileNameOld = GetStorageItemFileName(oldItem);
+            var fileNameNew = GetStorageItemFileName(newItem);
+            storageLocation.Location.MoveFile(fileNameOld, fileNameNew);
+
+            // Set tags (which als updates it in the search tree)
+            oldItem.UpdateTags(new string[] { });
+
+            // Add to change queue (sync thread will sync this delete to other storage locations)
+            foreach (var location in LocationInfos)
+            {
+                if (location == storageLocation)
+                    continue;
+                location.ChangesQueue.Enqueue(new StorageItemChange()
+                {
+                    Item = oldItem,
+                    LocationInfo = storageLocation,
+                    DataChanged = true
+                });
+                location.ChangesQueue.Enqueue(new StorageItemChange()
+                {
+                    Item = newItem,
+                    LocationInfo = storageLocation,
+                    DataChanged = true
+                });
+            }
+
+            // Save index file
+            await storageLocation.SaveIndexAsync();
+
+            return true;
+        }
+
         /// <summary>
         /// Open a file stored in one of the storage locations added to this storage pool. 
         /// The file will be opened as a stream which encrypts and adds repair data on the fly
@@ -291,12 +349,12 @@ namespace Comgenie.Storage
 
                 item = new StorageItem()
                 {
-                    StorageLocationInfo = storageLocation,
                     Id = itemId,
                     Created = DateTime.UtcNow,
                     LastModified = DateTime.UtcNow,
                     Length = 0
                 };                                       
+                item.StorageLocationInfo = storageLocation;
                 storageItemChanged = true;
                 storageLocation.Index.Items[itemId] = item;
             }
@@ -304,7 +362,11 @@ namespace Comgenie.Storage
             if (overwriteTags != null)
                 storageItemChanged = item.UpdateTags(overwriteTags);
 
-            var fileStream = storageLocation.Location.OpenFile(GetStorageItemFileName(item), mode, access);
+            var fn = GetStorageItemFileName(item);
+            if (File.Exists(fn) && (mode == FileMode.OpenOrCreate || mode == FileMode.Create || mode == FileMode.Truncate))
+                File.Delete(fn);
+
+            var fileStream = storageLocation.Location.OpenFile(fn, mode, access);
             if (fileStream == null)
                 return null;
 
@@ -317,6 +379,7 @@ namespace Comgenie.Storage
 
                 // File updated, Add to change queue (sync thread will sync this delete to other storage locations)
                 // TODO: Only sync specific changed blocks
+                //          (Can also be used for repairing corrupted parts of a file where there is a good backup)
                 item.LastModified = DateTime.UtcNow;
                 item.Length = stream.Length;
 
@@ -375,6 +438,16 @@ namespace Comgenie.Storage
             await storageLocation.SaveIndexAsync();
         }
 
+
+        public StorageItem? GetStorageItemById(string itemId)
+        {
+            StorageItem? item = null;
+            GetStorageLocationForItem(itemId, out item);
+            if (item == null || item.Length < 0)
+                return null; // deleted item
+            return item;
+        }
+
         /// <summary>
         /// Return all unique items matching this filter. If multiple storage locations have the same file, only the item from the highest priority storage location is returned.
         /// </summary>
@@ -387,9 +460,34 @@ namespace Comgenie.Storage
             {
                 foreach (var item in location.Tree.SearchTreeItem(filter))
                 {
-                    if (uniqueIds.Add(item.Id))
+                    if (item.Length >= 0 && uniqueIds.Add(item.Id))
                         yield return item;
                 }
+            }
+        }
+
+        public IQueryable<StorageItem> AsQueryable()
+        {
+            return new QueryTranslator<StorageItem>((string filter) =>
+            {
+                return List(filter);
+            });
+        }
+
+        public IQueryable<T> AsQueryable<T>() where T : class
+        {
+            return new QueryTranslator<T>((string filter) =>
+            {
+                return ListAndConvert<T>(filter);                
+            });
+        }
+        private IEnumerable<T> ListAndConvert<T>(string filter)
+        {
+            var storageItems = List(filter);
+            foreach (var storageItem in storageItems)
+            {
+                // TODO: Create new T and fill properties (normal properties + tags)
+                yield return default(T);
             }
         }
 

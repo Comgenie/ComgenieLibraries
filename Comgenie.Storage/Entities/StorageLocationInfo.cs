@@ -166,10 +166,13 @@ namespace Comgenie.Storage.Entities
                 await LoadIndexAsync(true);
             }
 
-            Index.LastModified = DateTime.UtcNow;
-            using (var file = Location.OpenFile("index.cmg", FileMode.Create, FileAccess.Write))
-            using (var encStream = new EncryptedAndRepairableStream(file, EncryptionKey, RepairPercent))
-                await JsonSerializer.SerializeAsync(encStream, Index);
+            lock (Index)
+            {
+                Index.LastModified = DateTime.UtcNow;
+                using (var file = Location.OpenFile("index.cmg", FileMode.Create, FileAccess.Write))
+                using (var encStream = new EncryptedAndRepairableStream(file, EncryptionKey, RepairPercent))
+                    JsonSerializer.SerializeAsync(encStream, Index).Wait();
+            }
 
 
             if (Shared)

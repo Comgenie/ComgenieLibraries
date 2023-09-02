@@ -8,6 +8,8 @@ using System.Threading.Tasks;
 
 namespace Comgenie.Storage.Utils
 {
+    // TODO: Change to use https://github.com/egbakou/reedsolomon/tree/main  instead
+
     /// <summary>
     /// This this a stream which saves the data to the inner stream encrypted and optionally repairable
     /// It does it by storing data in same size chunks, with a small header for each chunk containing the IV
@@ -21,12 +23,12 @@ namespace Comgenie.Storage.Utils
         private int LenFieldSize = 2;
         private int ChecksumSize = 4;
         private int RepairSize = 0;
-        private int InnerBlockSize = 0;
+        private int FullBlockSize = 0;
         private int HeaderSize = 0;
         private Stream InnerStream { get; set; } // stream of encrypted and repairable file
 
         private byte[] RawBlockBuffer { get; set; }
-        private byte[] InnerBlockBuffer { get; set; }
+        private byte[] FullBlockBuffer { get; set; }
 
         private int CurrentBlockLength { get; set; }
         private bool CurrentBlockBufferWritten { get; set; }
@@ -37,7 +39,7 @@ namespace Comgenie.Storage.Utils
 
         private long RawPosition { get; set; } // position in the original unencrypted file
         private long RawLength { get; set; }
-        public Action<bool> OnDispose { get; set; } // Custom callback when disposing, with a bool indicating if the stream was written to or not
+        public Action<bool>? OnDispose { get; set; } // Custom callback when disposing, with a bool indicating if the stream was written to or not
         private bool StreamWasWrittenTo { get; set; } = false;
         public EncryptedAndRepairableStream(Stream innerStream, byte[] encryptionKey, double? repairPercent)
         {
@@ -53,7 +55,7 @@ namespace Comgenie.Storage.Utils
                 RepairSize = 256;
 
             HeaderSize = LenFieldSize + IVSize + ChecksumSize + RepairSize;
-            InnerBlockSize = HeaderSize + RawBlockSize;
+            FullBlockSize = HeaderSize + RawBlockSize;
 
             InnerPosition = innerStream.Position;
             InnerLength = innerStream.Length;
@@ -61,12 +63,12 @@ namespace Comgenie.Storage.Utils
             RawPosition = innerStream.Position; // TODO
 
             // TODO: We are now just estimating the length
-            RawLength = innerStream.Length / InnerBlockSize * RawBlockSize;
-            if (innerStream.Length % InnerBlockSize > HeaderSize)
-                RawLength += innerStream.Length % InnerBlockSize - HeaderSize;
+            RawLength = innerStream.Length / FullBlockSize * RawBlockSize;
+            if (innerStream.Length % FullBlockSize > HeaderSize)
+                RawLength += innerStream.Length % FullBlockSize - HeaderSize;
 
             RawBlockBuffer = new byte[RawBlockSize];
-            InnerBlockBuffer = new byte[InnerBlockSize];
+            FullBlockBuffer = new byte[FullBlockSize];
         }
 
         public override bool CanRead => InnerStream?.CanRead ?? false;
@@ -104,7 +106,7 @@ namespace Comgenie.Storage.Utils
                 return false;
 
             bool repaired = false;
-            var startBlockPos = InnerBlockSize * CurrentBlockIndex;
+            var startBlockPos = FullBlockSize * CurrentBlockIndex;
             if (InnerLength < startBlockPos)
             {
                 CurrentBlockLength = 0;
@@ -121,9 +123,9 @@ namespace Comgenie.Storage.Utils
                     while (InnerPosition < startBlockPos)
                     {
                         var readAmount = startBlockPos - InnerPosition;
-                        if (readAmount > InnerBlockBuffer.Length)
-                            readAmount = InnerBlockBuffer.Length;
-                        var tmpRead = InnerStream.Read(InnerBlockBuffer, 0, (int)readAmount);
+                        if (readAmount > FullBlockBuffer.Length)
+                            readAmount = FullBlockBuffer.Length;
+                        var tmpRead = InnerStream.Read(FullBlockBuffer, 0, (int)readAmount);
                         if (tmpRead == 0)
                             throw new Exception("Cannot forward behind file");
                         InnerPosition += tmpRead;
@@ -137,10 +139,10 @@ namespace Comgenie.Storage.Utils
             }
 
 
-            var left = InnerBlockSize;
+            var left = FullBlockSize;
             while (left > 0)
             {
-                var curRead = InnerStream.Read(InnerBlockBuffer, InnerBlockSize - left, left);
+                var curRead = InnerStream.Read(FullBlockBuffer, FullBlockSize - left, left);
                 if (curRead == 0) // end of file
                 {
                     break;
@@ -149,7 +151,7 @@ namespace Comgenie.Storage.Utils
                 InnerPosition += curRead;
             }
 
-            var innerLen = InnerBlockSize - left;
+            var innerLen = FullBlockSize - left;
             if (innerLen < HeaderSize)
             {
                 CurrentBlockLength = 0;
@@ -161,8 +163,8 @@ namespace Comgenie.Storage.Utils
                 CurrentBlockLength = CurrentBlockLength + (16 - CurrentBlockLength % 16);
 
             // Check checksum
-            var storedChecksum = BitConverter.ToUInt32(InnerBlockBuffer, 0);
-            var currentChecksum = CRC32.CalculateCRC32(InnerBlockBuffer, ChecksumSize, innerLen - ChecksumSize);
+            var storedChecksum = BitConverter.ToUInt32(FullBlockBuffer, 0);
+            var currentChecksum = CRC32.CalculateCRC32(FullBlockBuffer, ChecksumSize, innerLen - ChecksumSize);
             if (storedChecksum != currentChecksum)
             {
                 // Repair if possible
@@ -172,28 +174,28 @@ namespace Comgenie.Storage.Utils
                 var corruptDataLength = innerLen - (ChecksumSize + RepairSize);
 
                 var eccData = new byte[RepairSize];
-                Buffer.BlockCopy(InnerBlockBuffer, ChecksumSize, eccData, 0, RepairSize);
+                Buffer.BlockCopy(FullBlockBuffer, ChecksumSize, eccData, 0, RepairSize);
 
-                var repairedData = ReedSolomonAlgorithm.Decode(InnerBlockBuffer, eccData, ErrorCorrectionCodeType.QRCode, ChecksumSize + RepairSize, corruptDataLength);
+                var repairedData = ReedSolomonAlgorithm.Decode(FullBlockBuffer, eccData, ErrorCorrectionCodeType.QRCode, ChecksumSize + RepairSize, corruptDataLength);
                 if (repairedData == null)
                     throw new Exception("Could not repair data in file");
-                Buffer.BlockCopy(repairedData, 0, InnerBlockBuffer, ChecksumSize + RepairSize, corruptDataLength);
+                Buffer.BlockCopy(repairedData, 0, FullBlockBuffer, ChecksumSize + RepairSize, corruptDataLength);
 
                 // Also regenerate checksum as it can also be corrupted
-                var checksum = CRC32.CalculateCRC32(InnerBlockBuffer, ChecksumSize, CurrentBlockLength + HeaderSize - ChecksumSize);
-                BitConverter.GetBytes(checksum).CopyTo(InnerBlockBuffer, 0);
+                var checksum = CRC32.CalculateCRC32(FullBlockBuffer, ChecksumSize, CurrentBlockLength + HeaderSize - ChecksumSize);
+                BitConverter.GetBytes(checksum).CopyTo(FullBlockBuffer, 0);
 
                 repaired = true;
             }
 
             // Decrypt data
             byte[] iv = new byte[16];
-            Buffer.BlockCopy(InnerBlockBuffer, ChecksumSize + RepairSize + LenFieldSize, iv, 0, 16);
+            Buffer.BlockCopy(FullBlockBuffer, ChecksumSize + RepairSize + LenFieldSize, iv, 0, 16);
             using (var decryptor = AesEncryption.CreateDecryptor(AesEncryption.Key, iv))
-                decryptor.TransformBlock(InnerBlockBuffer, HeaderSize, CurrentBlockLength, RawBlockBuffer, 0);
+                decryptor.TransformBlock(FullBlockBuffer, HeaderSize, CurrentBlockLength, RawBlockBuffer, 0);
 
             // Set length to actual data contents, the encrypted data can be larger
-            CurrentBlockLength = BitConverter.ToUInt16(InnerBlockBuffer, ChecksumSize + RepairSize);
+            CurrentBlockLength = BitConverter.ToUInt16(FullBlockBuffer, ChecksumSize + RepairSize);
 
             if (CurrentBlockLength < RawBlockSize) // last block, update the length to the exact number
                 RawLength = CurrentBlockIndex * RawBlockSize + CurrentBlockLength;
@@ -207,7 +209,7 @@ namespace Comgenie.Storage.Utils
             if (!CurrentBlockBufferWritten || InnerStream == null)
                 return;
 
-            var startBlockPos = InnerBlockSize * CurrentBlockIndex;
+            var startBlockPos = FullBlockSize * CurrentBlockIndex;
             if (InnerPosition != startBlockPos)
             {
                 if (!InnerStream.CanSeek)
@@ -217,7 +219,7 @@ namespace Comgenie.Storage.Utils
             }
 
             var origLen = (ushort)CurrentBlockLength;
-            BitConverter.GetBytes(origLen).CopyTo(InnerBlockBuffer, ChecksumSize + RepairSize);
+            BitConverter.GetBytes(origLen).CopyTo(FullBlockBuffer, ChecksumSize + RepairSize);
 
             // Expand because encrypted data needs to be stored in blocks of 16 bytes
             if (CurrentBlockLength % 16 > 0)
@@ -225,24 +227,24 @@ namespace Comgenie.Storage.Utils
 
             // Encrypt
             AesEncryption.GenerateIV();
-            Buffer.BlockCopy(AesEncryption.IV, 0, InnerBlockBuffer, ChecksumSize + RepairSize + LenFieldSize, AesEncryption.IV.Length);
+            Buffer.BlockCopy(AesEncryption.IV, 0, FullBlockBuffer, ChecksumSize + RepairSize + LenFieldSize, AesEncryption.IV.Length);
             using (var encryptor = AesEncryption.CreateEncryptor())
-                encryptor.TransformBlock(RawBlockBuffer, 0, CurrentBlockLength, InnerBlockBuffer, HeaderSize);
+                encryptor.TransformBlock(RawBlockBuffer, 0, CurrentBlockLength, FullBlockBuffer, HeaderSize);
 
             // Generate repair data for both IV and Data
             if (RepairSize != 0)
             {
-                var repairBytes = ReedSolomonAlgorithm.Encode(InnerBlockBuffer, RepairSize, ErrorCorrectionCodeType.QRCode, ChecksumSize + RepairSize, CurrentBlockLength + IVSize + LenFieldSize);
-                Buffer.BlockCopy(repairBytes, 0, InnerBlockBuffer, ChecksumSize, RepairSize);
+                var repairBytes = ReedSolomonAlgorithm.Encode(FullBlockBuffer, RepairSize, ErrorCorrectionCodeType.QRCode, ChecksumSize + RepairSize, CurrentBlockLength + IVSize + LenFieldSize);
+                Buffer.BlockCopy(repairBytes, 0, FullBlockBuffer, ChecksumSize, RepairSize);
             }
 
             // Generate checksum
-            var checksum = CRC32.CalculateCRC32(InnerBlockBuffer, ChecksumSize, CurrentBlockLength + HeaderSize - ChecksumSize);
-            BitConverter.GetBytes(checksum).CopyTo(InnerBlockBuffer, 0);
+            var checksum = CRC32.CalculateCRC32(FullBlockBuffer, ChecksumSize, CurrentBlockLength + HeaderSize - ChecksumSize);
+            BitConverter.GetBytes(checksum).CopyTo(FullBlockBuffer, 0);
 
             // TODO: Optionally replace checksum by sha256 hash data+key+blockindex
 
-            InnerStream.Write(InnerBlockBuffer, 0, CurrentBlockLength + HeaderSize);
+            InnerStream.Write(FullBlockBuffer, 0, CurrentBlockLength + HeaderSize);
             InnerPosition += CurrentBlockLength + HeaderSize;
 
             CurrentBlockBufferWritten = false;
@@ -322,7 +324,7 @@ namespace Comgenie.Storage.Utils
             RawPosition = offset;
 
 
-            InnerPosition = writeInBlock * InnerBlockSize;
+            InnerPosition = writeInBlock * FullBlockSize;
             InnerPosition += HeaderSize + writeInBlockPos;
 
             return InnerStream.Seek(InnerPosition, origin);

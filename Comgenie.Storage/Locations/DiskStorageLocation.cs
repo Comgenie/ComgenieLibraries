@@ -25,6 +25,12 @@ namespace Comgenie.Storage.Locations
             File.Delete(System.IO.Path.Combine(Path, path));
         }
 
+        public void MoveFile(string oldPath, string newPath)
+        {
+            if (Path == null)
+                throw new Exception("Disk storage location is missing required settings");
+            File.Move(System.IO.Path.Combine(Path, oldPath), System.IO.Path.Combine(Path, newPath), true);
+        }
 
         public bool IsAvailable()
         {

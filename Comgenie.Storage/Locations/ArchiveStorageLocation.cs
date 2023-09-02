@@ -19,7 +19,10 @@ namespace Comgenie.Storage.Locations
         {
             
         }
+        public void MoveFile(string oldPath, string newPath)
+        {
 
+        }
         public bool IsAvailable()
         {
             if (ArchivePath == null)

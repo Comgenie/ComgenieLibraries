@@ -31,7 +31,20 @@ namespace HttpServerExample
             }
             return null;
         }
-
+        public override WebDavFileInfo? GetFileInfo(object authObject, string path)
+        {
+            if (path == "Example Folder/Example File.txt")
+            {
+                return new WebDavFileInfo()
+                {
+                    IsCollection = false,
+                    Name = path,
+                    Size = 16,
+                    ContentType = "text/plain",
+                };
+            }
+            return null;
+        }
         public override List<WebDavFileInfo> ListFiles(object authObject, string path)
         {
             var list = new List<WebDavFileInfo>();

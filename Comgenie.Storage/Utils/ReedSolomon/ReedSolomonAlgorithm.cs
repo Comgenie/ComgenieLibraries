@@ -10,6 +10,8 @@ namespace Comgenie.Storage.Utils.ReedSolomon
 
     public static class ReedSolomonAlgorithm
     {
+        private static ReedSolomonEncoder Encoder = null;
+        private static ReedSolomonDecoder Decoder = null;
         /// <summary>
         /// Produces error correction codewords for a message using the Reed-Solomon algorithm.
         /// </summary>
@@ -27,9 +29,9 @@ namespace Comgenie.Storage.Utils.ReedSolomon
                 galoisField = GenericGF.DATA_MATRIX_FIELD_256;
             else
                 throw new ArgumentException($"Invalid '{nameof(eccType)}' argument.", nameof(eccType));
-
-            var reedSolomonEncoder = new ReedSolomonEncoder(galoisField);
-            return reedSolomonEncoder.EncodeEx(message, eccCount, offset, length);
+            if (Encoder == null)
+                Encoder = new ReedSolomonEncoder(galoisField);
+            return Encoder.EncodeEx(message, eccCount, offset, length);
         }
 
         /// <summary>
@@ -60,9 +62,9 @@ namespace Comgenie.Storage.Utils.ReedSolomon
                 galoisField = GenericGF.DATA_MATRIX_FIELD_256;
             else
                 throw new ArgumentException($"Invalid '{nameof(eccType)}' argument.", nameof(eccType));
-
-            var reedSolomonDecoder = new ReedSolomonDecoder(galoisField);
-            return reedSolomonDecoder.DecodeEx(message, ecc, offset, len);
+            if (Decoder == null)
+                Decoder = new ReedSolomonDecoder(galoisField);
+            return Decoder.DecodeEx(message, ecc, offset, len);
         }
 
         /// <summary>

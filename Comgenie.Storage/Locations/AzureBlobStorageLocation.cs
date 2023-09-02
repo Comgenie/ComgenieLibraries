@@ -48,6 +48,24 @@ namespace Comgenie.Storage.Locations
             }
             return true;
         }
+        public void MoveFile(string oldPath, string newPath)
+        {
+            // Use a HTTP PUT request to rename the blob in the storage account using the SAS URL.
+            var url = SasUrl.Substring(0, SasUrl.IndexOf("?")) + "/" + newPath + SasUrl.Substring(SasUrl.IndexOf("?")) + "&comp=rename";
+            var urlOld = SasUrl.Substring(0, SasUrl.IndexOf("?")) + "/" + oldPath + SasUrl.Substring(SasUrl.IndexOf("?"));
+
+            using (var httpClient = new HttpClient())
+            using (var request = new HttpRequestMessage(HttpMethod.Put, url))
+            {
+                request.Headers.Add("x-ms-date", DateTime.UtcNow.ToString("R", CultureInfo.InvariantCulture));
+                request.Headers.Add("x-ms-file-rename-replace-if-exists", "true");
+                request.Headers.Add("x-ms-file-rename-source", urlOld);
+                
+                var response = httpClient.SendAsync(request).Result;
+                if (!response.IsSuccessStatusCode)
+                    throw new Exception("Error when moving file in Azure: " + response.StatusCode);
+            }
+        }
 
         public void SetConnection(string connectionString)
         {

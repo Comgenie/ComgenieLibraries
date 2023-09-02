@@ -11,6 +11,7 @@ namespace Comgenie.Storage.Locations
         void SetConnection(string connectionString);
         Stream? OpenFile(string path, FileMode mode, FileAccess access);
         void DeleteFile(string path);
+        void MoveFile(string oldPath, string newPath);
         bool IsAvailable();
     }
 }

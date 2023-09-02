@@ -158,7 +158,7 @@ namespace Comgenie.Storage.Utils.ReedSolomon
             Array.Copy(largerCoefficients, 0, sumDiff, 0, lengthDiff);
 
             for (int i = lengthDiff; i < largerCoefficients.Length; i++)
-                sumDiff[i] = GenericGF.AddOrSubtract(smallerCoefficients[i - lengthDiff], largerCoefficients[i]);
+                sumDiff[i] = (int)(smallerCoefficients[i - lengthDiff] ^ largerCoefficients[i]);// GenericGF.AddOrSubtract(smallerCoefficients[i - lengthDiff], largerCoefficients[i]);
 
             return new GenericGFPoly(field, sumDiff);
         }
