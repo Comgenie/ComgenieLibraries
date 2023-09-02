@@ -575,8 +575,8 @@ namespace Comgenie.Server.Handlers
 
                                             var headerValue = curData;
                                             curData = "";
-                                            if (!headers.ContainsKey(headerName))
-                                                headers.Add(headerName, headerValue);
+                                            if (!headers.ContainsKey(headerName.ToLower()))
+                                                headers.Add(headerName.ToLower(), headerValue);
                                             headerName = "";
                                             curLineStart = i + 2;
 
