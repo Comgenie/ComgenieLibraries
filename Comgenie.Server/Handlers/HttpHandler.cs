@@ -333,7 +333,7 @@ namespace Comgenie.Server.Handlers
                     }
                     catch (Exception e)
                     {
-                        var content = "An error happened while executing this request.";
+                        var content = "An error happened while executing this request. (" + data.Client.RemoteAddress +")";
                         if (data.Client.RemoteAddress.StartsWith("192.168.") || data.Client.RemoteAddress.StartsWith("127.0."))
                         {
                             content += "\r\n" +  e.Message + "\r\n" + e.StackTrace;
@@ -494,13 +494,13 @@ namespace Comgenie.Server.Handlers
                             }
                             catch { }
                         }
-                        else if (data.ContentType == "application/x-www-form-urlencoded" && data.DataLength < 1024*1024*100)
+                        else if (data?.ContentType == "application/x-www-form-urlencoded" && data.DataLength < 1024*1024*100)
                         {
                             // Parse as normal=query&string=parameters
                             using (var sr = new StreamReader(data.DataStream, Encoding.UTF8, leaveOpen: true))
                                 GetParametersFromQueryString(rawParameters, sr.ReadToEnd());
                         }
-                        else if (data.ContentType.StartsWith("multipart/form-data; boundary=")) // Usually a file upload, but can be form data as well
+                        else if (data.ContentType != null && data.ContentType.StartsWith("multipart/form-data; boundary=")) // Usually a file upload, but can be form data as well
                         {
                             data.FileData = new List<HttpClientFileData>();
                             var boundary = data.ContentType.Substring(30);
@@ -702,6 +702,14 @@ namespace Comgenie.Server.Handlers
                         StringBuilder request = new StringBuilder();
                         request.AppendLine(data.Method + " /"+ data.RequestRaw.Substring(tmpRoutePrefix.Length + 1) + " HTTP/1.1"); // TODO: Remove any folder in our routing path
                         request.AppendLine("Host: " + new Uri(route.Proxy).Host);
+                        if (route.ShouldSendForwardHeaders)
+                        {
+                            if (data.Headers.ContainsKey("host"))
+                                request.AppendLine("X-Forwarded-Host: " + data.Headers["host"]);
+                            request.AppendLine("X-Forwarded-Proto: " + (data.Client.StreamIsEncrypted ? "https" : "http"));
+                            request.AppendLine("X-Forwarded-For: " + data.Client.RemoteAddress);
+                        }
+
                         foreach (var requestHeader in data.FullRawHeaders.ToList())
                         {
                             if (requestHeader.Key == "Host")
@@ -847,7 +855,7 @@ namespace Comgenie.Server.Handlers
                     //response.GZipResponse = EnableGZipCompressionContentTypes != null && EnableGZipCompressionContentTypes.Contains(Path.GetExtension(response.FileName).ToLower());
                     response.Headers.Add("Cache-Control", "public, max-age=86400");
                 }
-                response.ContentType = (route.ContentType ?? GetContentTypeFromFileName(response.FileName));
+                response.ContentType = (route.ContentType ?? ContentTypeUtil.GetContentTypeFromFileName(response.FileName));
 
                 // Allow ranges
                 response.Headers.Add("Accept-Ranges", "bytes");
@@ -869,7 +877,7 @@ namespace Comgenie.Server.Handlers
             }
 
             // Check if we return any content type we want to gzip compress (note that http application may also set this flag)
-            if (!response.GZipResponse && EnableGZipCompressionContentTypes != null && EnableGZipCompressionContentTypes.Any(a => response.ContentType.StartsWith(a)))
+            if (!response.GZipResponse && response.ContentType != null && EnableGZipCompressionContentTypes != null && EnableGZipCompressionContentTypes.Any(a => response.ContentType.StartsWith(a)))
             {
                 response.GZipResponse = true;
             }
@@ -930,6 +938,16 @@ namespace Comgenie.Server.Handlers
             {
                 // Just return the headers
                 client.SendData(tmpResponseHeader, 0, tmpResponseHeader.Length);
+
+                if (response.Stream != null)
+                {
+                    try
+                    {
+                        response.Stream.Close();
+                        response.Stream.Dispose();
+                    }
+                    catch { }
+                }
                 return;
             }
 
@@ -1002,42 +1020,6 @@ namespace Comgenie.Server.Handlers
             }
         }
 
-        public static string GetContentTypeFromFileName(string fileName)
-        {
-            if (fileName== null)
-                return "application/octet-stream";
-            var ext = Path.GetExtension(fileName.ToLower()).Replace(".","");
-            if (ext == "htm" || ext == "html")
-                return "text/html";
-            else if (ext == "js")
-                return "text/javascript";
-            else if (ext == "css")
-                return "text/css";
-            else if (ext == "csv")
-                return "text/csv";
-            else if (ext == "jpg" || ext == "jpeg")
-                return "image/jpeg";
-            else if (ext == "png")
-                return "image/png";
-            else if (ext == "gif")
-                return "image/gif";
-            else if (ext == "webp")
-                return "image/webp";
-            else if (ext == "svg")
-                return "image/svg+xml";
-            else if (ext == "json")
-                return "application/json";
-            else if (ext == "xml")
-                return "application/xml";
-            else if (ext == "txt")
-                return "text/plain";
-            else if (ext == "mp4")
-                return "video/mp4";
-            else if (ext == "mk4")
-                return "video/x-matroska";
-            return "application/octet-stream";
-        }
-
         public void AddFileRoute(string domain, string path, string localPath, string contentType)
         {            
             AddRoute(domain, path, new Route()
@@ -1046,13 +1028,14 @@ namespace Comgenie.Server.Handlers
                 LocalPath = localPath
             });
         }
-        public void AddProxyRoute(string domain, string path, string targetUrl, Func<string, string, bool> shouldInterceptHandler = null, Func<string, string, string, string> interceptHandler=null)
+        public void AddProxyRoute(string domain, string path, string targetUrl, Func<string, string, bool> shouldInterceptHandler = null, Func<string, string, string, string> interceptHandler=null, bool shouldSendForwardHeaders=true)
         {
             AddRoute(domain, path, new Route()
             {
                 Proxy = targetUrl,
                 ProxyInterceptHandler = interceptHandler,
-                ProxyShouldInterceptHandler = shouldInterceptHandler
+                ProxyShouldInterceptHandler = shouldInterceptHandler,
+                ShouldSendForwardHeaders = shouldSendForwardHeaders
             });
         }
         public void AddContentRoute(string domain, string path, byte[] contents, string contentType)
@@ -1125,6 +1108,7 @@ namespace Comgenie.Server.Handlers
             public string LocalPath { get; set; }
             public object Application { get; set; }
             public string Proxy { get; set; }
+            public bool ShouldSendForwardHeaders { get; set; }
             public Func<string, string, bool> ProxyShouldInterceptHandler { get; set; } // bool ShouldIntercept(requestPath, responseHeaders)
             public Func<string, string, string, string> ProxyInterceptHandler { get; set; } // string NewContent(requestPath, responseHeaders, responseContent)
             public MethodInfo ApplicationMethod { get; set; }
