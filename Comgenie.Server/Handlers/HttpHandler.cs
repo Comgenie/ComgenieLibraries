@@ -504,6 +504,8 @@ namespace Comgenie.Server.Handlers
                         {
                             data.FileData = new List<HttpClientFileData>();
                             var boundary = data.ContentType.Substring(30);
+                            if (boundary.StartsWith("\"") && boundary.EndsWith("\""))
+                                boundary = boundary.Trim('"');
                             var boundaryBytes = ASCIIEncoding.ASCII.GetBytes("--"+boundary);
                             long curDataPos = 0;
                             long startContent = -1;
@@ -603,7 +605,10 @@ namespace Comgenie.Server.Handlers
                                                 if (headerValue.Contains("filename"))
                                                 {
                                                     // File upload
-                                                    fileName = Between(headerValue, "filename=\"", "\"");
+                                                    var headerValueFileName = headerValue.Substring(headerValue.IndexOf("filename=") + 9);
+                                                    if (headerValueFileName.Contains(";"))
+                                                        headerValueFileName = headerValueFileName.Substring(0, headerValueFileName.IndexOf(";"));
+                                                    fileName = headerValueFileName.Replace("\"", "").Trim();
                                                 }
                                                 else
                                                 {
@@ -642,7 +647,6 @@ namespace Comgenie.Server.Handlers
                                     startContent = endContent + 2 + boundaryBytes.Length + 2; // Next content is after \r\n, the end boundary, and another \r\n
                                 }
                             }
-                            
                         }
                         
                         data.DataStream.Position = 0;
