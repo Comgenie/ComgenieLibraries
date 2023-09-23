@@ -88,7 +88,7 @@ namespace Comgenie.Storage
             try
             {
                 using (var file = File.Open(FileName, FileMode.Open, FileAccess.Read))
-                using (var es = new EncryptedAndRepairableStream(file, EncryptionKey, 25))
+                using (var es = new EncryptedAndRepairableStream(file, EncryptionKey, true))
                 using (var reader = new StreamReader(es))
                 {
                     var verifyLine = reader.ReadLine();
@@ -140,7 +140,7 @@ namespace Comgenie.Storage
         {
             var json = JsonSerializer.Serialize(Data);
             using (var file = File.Open(FileName, FileMode.Create))
-            using (var es = new EncryptedAndRepairableStream(file, EncryptionKey, 25))
+            using (var es = new EncryptedAndRepairableStream(file, EncryptionKey, true))
             using (var writer = new StreamWriter(es))
             {
                 writer.WriteLine(VerifyLine);

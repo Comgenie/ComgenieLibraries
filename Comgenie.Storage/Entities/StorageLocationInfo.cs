@@ -18,7 +18,7 @@ namespace Comgenie.Storage.Entities
         public IStorageLocation Location { get; set; }
         public int? SyncInterval { get; set; }
         public int Priority { get; set; }
-        public double? RepairPercent { get; set; }
+        public bool EnableRepairData { get; set; }
         public byte[] EncryptionKey { get; set; }
         public string[]? TagFilters { get; set; } = null;
         public bool Shared { get; set; } = false;
@@ -63,7 +63,7 @@ namespace Comgenie.Storage.Entities
             else
             {
                 // Deserialize 
-                using (var encStream = new EncryptedAndRepairableStream(file, EncryptionKey, RepairPercent))
+                using (var encStream = new EncryptedAndRepairableStream(file, EncryptionKey, EnableRepairData))
                 {
                     var newIndex = await JsonSerializer.DeserializeAsync<StoragePoolIndex>(encStream);
                     if (newIndex == null)
@@ -170,7 +170,7 @@ namespace Comgenie.Storage.Entities
             {
                 Index.LastModified = DateTime.UtcNow;
                 using (var file = Location.OpenFile("index.cmg", FileMode.Create, FileAccess.Write))
-                using (var encStream = new EncryptedAndRepairableStream(file, EncryptionKey, RepairPercent))
+                using (var encStream = new EncryptedAndRepairableStream(file, EncryptionKey, EnableRepairData))
                     JsonSerializer.SerializeAsync(encStream, Index).Wait();
             }
 

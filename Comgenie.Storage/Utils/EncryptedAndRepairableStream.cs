@@ -1,10 +1,11 @@
-﻿using Comgenie.Storage.Utils.ReedSolomon;
+﻿using Comgenie.Storage.Utils.ReedSolomonNet;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
+using System.Xml.Linq;
 
 namespace Comgenie.Storage.Utils
 {
@@ -23,8 +24,12 @@ namespace Comgenie.Storage.Utils
         private int LenFieldSize = 2;
         private int ChecksumSize = 4;
         private int RepairSize = 0;
+        private int RepairChecksumSize = 0;
         private int FullBlockSize = 0;
         private int HeaderSize = 0;
+
+        private int RepairShardDataCount = 6;
+        private int RepairShardRepairCount = 2;
         private Stream InnerStream { get; set; } // stream of encrypted and repairable file
 
         private byte[] RawBlockBuffer { get; set; }
@@ -41,7 +46,7 @@ namespace Comgenie.Storage.Utils
         private long RawLength { get; set; }
         public Action<bool>? OnDispose { get; set; } // Custom callback when disposing, with a bool indicating if the stream was written to or not
         private bool StreamWasWrittenTo { get; set; } = false;
-        public EncryptedAndRepairableStream(Stream innerStream, byte[] encryptionKey, double? repairPercent)
+        public EncryptedAndRepairableStream(Stream innerStream, byte[] encryptionKey, bool includeRepairData=false)
         {
             InnerStream = innerStream;
             AesEncryption = Aes.Create();
@@ -49,10 +54,15 @@ namespace Comgenie.Storage.Utils
             var hash = SHA256.Create().ComputeHash(encryptionKey);
             AesEncryption.Key = hash;
 
-            if (repairPercent.HasValue)
-                RepairSize = (int)((double)RawBlockSize / 100 * repairPercent.Value);
-            if (RepairSize > 256)
-                RepairSize = 256;
+            if (includeRepairData) // We will divide each data block into multiple shards, and generate additional parity shards
+            {
+                RepairSize = RawBlockSize + IVSize + LenFieldSize;
+                if (RepairSize % RepairShardDataCount != 0)
+                    RepairSize = RepairSize + (RepairShardDataCount - RepairSize % RepairShardDataCount);
+                 
+                RepairChecksumSize = (ChecksumSize * (RepairShardDataCount + RepairShardRepairCount));
+                RepairSize = ((RawBlockSize / RepairShardDataCount) * RepairShardRepairCount) + RepairChecksumSize * 2;
+            }
 
             HeaderSize = LenFieldSize + IVSize + ChecksumSize + RepairSize;
             FullBlockSize = HeaderSize + RawBlockSize;
@@ -98,6 +108,7 @@ namespace Comgenie.Storage.Utils
             Block format:  [Checksum] [ x Repair Data ] + [ 2 byte len ] + [ 16 IV ] + [ 512 data ] 
              Checksum is calculated over everything after that
              Repair data is calculated over everything after that
+             Repair data format:  [Checksum * (DataShardCount+RepairDataCount] + [ Repair Shard ] + [ Repair Shard ] + .. + [ Another checksum block ]
          */
 
         private bool ReadBlockToBuffer()
@@ -170,16 +181,78 @@ namespace Comgenie.Storage.Utils
                 // Repair if possible
                 if (RepairSize == 0)
                     throw new Exception("Checksum doesn't match and no repair data available.");
-
+                
                 var corruptDataLength = innerLen - (ChecksumSize + RepairSize);
+                var startRepairableData = ChecksumSize + RepairSize;
+                var shardSize = (RepairSize - RepairChecksumSize * 2) / RepairShardRepairCount;
+                var shards = new byte[RepairShardDataCount + RepairShardRepairCount][];
+                var remainingDataLen = corruptDataLength;
+                for (int i = 0; i < shards.Length; i++)
+                {
+                    shards[i] = new byte[shardSize];
+                    if (i >= RepairShardDataCount) // Repair data
+                    {
+                        Buffer.BlockCopy(FullBlockBuffer, ChecksumSize + RepairChecksumSize + ((i - RepairShardDataCount) * shardSize), shards[i], 0, shardSize);
+                    }
+                    else
+                    {
+                        // Normal data
+                        if (remainingDataLen == 0)
+                            continue;
+                        var lenShardData = shardSize;
+                        if (remainingDataLen < lenShardData)
+                            lenShardData = remainingDataLen;
+                        Buffer.BlockCopy(FullBlockBuffer, startRepairableData + (i * shardSize), shards[i], 0, lenShardData);
+                        remainingDataLen -= lenShardData;
+                    }
+                }
 
-                var eccData = new byte[RepairSize];
-                Buffer.BlockCopy(FullBlockBuffer, ChecksumSize, eccData, 0, RepairSize);
+                // Check checksums
+                var present = new bool[shards.Length];
+                for (int i = 0; i < shards.Length; i++)
+                {
+                    var storedShardChecksum = BitConverter.ToUInt32(FullBlockBuffer, ChecksumSize + (i * ChecksumSize));
+                    var currentShardChecksum = CRC32.CalculateCRC32(shards[i], 0, shardSize);
+                    present[i] = (storedShardChecksum == currentShardChecksum);
+                }
 
-                var repairedData = ReedSolomonAlgorithm.Decode(FullBlockBuffer, eccData, ErrorCorrectionCodeType.QRCode, ChecksumSize + RepairSize, corruptDataLength);
-                if (repairedData == null)
+                if (present.Where(a => !a ).Count() > RepairShardRepairCount)
+                {
+                    // There are multiple checksums invalid, todo, use backup checksum at end of repair data
+                    for (int i = 0; i < shards.Length; i++)
+                    {
+                        var storedShardChecksum = BitConverter.ToUInt32(FullBlockBuffer, ChecksumSize + (RepairSize - RepairChecksumSize) + (i * ChecksumSize));
+                        var currentShardChecksum = CRC32.CalculateCRC32(shards[i], 0, shardSize);
+                        present[i] = (storedShardChecksum == currentShardChecksum);
+                    }
+
+                    if (present.Where(a => !a).Count() > RepairShardRepairCount)
+                    {
+                        // TODO: Use the full block checksum + brute force repair as a last fallback
+                        throw new Exception("Could not repair data in file");
+                    }
+
+                }
+
+                var reedSolomon = ReedSolomonNet.ReedSolomon.Create(RepairShardDataCount, RepairShardRepairCount);
+                reedSolomon.DecodeMissing(shards, present, 0, shardSize);
+
+                if (!reedSolomon.IsParityCorrect(shards, 0, shardSize))
                     throw new Exception("Could not repair data in file");
-                Buffer.BlockCopy(repairedData, 0, FullBlockBuffer, ChecksumSize + RepairSize, corruptDataLength);
+
+                // Copy repaired data back                
+                remainingDataLen = corruptDataLength;
+                for (int i = 0; i < shards.Length - RepairShardRepairCount; i++)
+                {
+                    if (remainingDataLen == 0)
+                        break;
+
+                    var lenShardData = shardSize;
+                    if (remainingDataLen < lenShardData)
+                        lenShardData = remainingDataLen;
+                    Buffer.BlockCopy(shards[i], 0, FullBlockBuffer, startRepairableData + (i * shardSize), lenShardData);
+                    remainingDataLen -= lenShardData;
+                }
 
                 // Also regenerate checksum as it can also be corrupted
                 var checksum = CRC32.CalculateCRC32(FullBlockBuffer, ChecksumSize, CurrentBlockLength + HeaderSize - ChecksumSize);
@@ -234,8 +307,44 @@ namespace Comgenie.Storage.Utils
             // Generate repair data for both IV and Data
             if (RepairSize != 0)
             {
-                var repairBytes = ReedSolomonAlgorithm.Encode(FullBlockBuffer, RepairSize, ErrorCorrectionCodeType.QRCode, ChecksumSize + RepairSize, CurrentBlockLength + IVSize + LenFieldSize);
-                Buffer.BlockCopy(repairBytes, 0, FullBlockBuffer, ChecksumSize, RepairSize);
+                // Split the current block buffer into 4 shards, generate 1 parity shard, save that as repair data                
+                var actualLenRepairableData = CurrentBlockLength + IVSize + LenFieldSize;
+                var startRepairableData = ChecksumSize + RepairSize;
+                var reedSolomon = ReedSolomonNet.ReedSolomon.Create(RepairShardDataCount, RepairShardRepairCount);
+                var shards = new byte[RepairShardDataCount + RepairShardRepairCount][];
+                var shardSize = (RepairSize - RepairChecksumSize * 2) / RepairShardRepairCount;
+                for (var i=0;i<shards.Length;i++)
+                {
+                    shards[i] = new byte[shardSize];
+
+                    if (i < RepairShardDataCount && actualLenRepairableData > 0)
+                    {
+                        // Note that the last block can be smaller than the full block size, we will just act like all remaining data are 0's then
+                        var lenShardData = shardSize;
+                        if (actualLenRepairableData < lenShardData)
+                            lenShardData = actualLenRepairableData;
+                        Buffer.BlockCopy(FullBlockBuffer, startRepairableData + (i * shardSize), shards[i], 0, lenShardData);
+                        actualLenRepairableData -= lenShardData;
+                    }
+                }
+                reedSolomon.EncodeParity(shards, 0, shardSize);
+
+                if (!reedSolomon.IsParityCorrect(shards, 0, shardSize))
+                    throw new Exception("Check failed");
+
+                // Set checksums at beginning and end of repair data for each shard
+                byte[] shardChecksumData = new byte[RepairChecksumSize];
+                for (var i=0;i<shards.Length;i++)
+                {
+                    var checksumShard = CRC32.CalculateCRC32(shards[i], 0, shardSize);
+                    BitConverter.GetBytes(checksumShard).CopyTo(shardChecksumData, i * ChecksumSize);
+                }
+                Buffer.BlockCopy(shardChecksumData, 0, FullBlockBuffer, ChecksumSize, RepairChecksumSize);
+                for (var i=0;i<RepairShardRepairCount;i++)
+                {
+                    Buffer.BlockCopy(shards[RepairShardDataCount + i], 0, FullBlockBuffer, ChecksumSize + RepairChecksumSize + (shardSize * i), shardSize);
+                }
+                Buffer.BlockCopy(shardChecksumData, 0, FullBlockBuffer, ChecksumSize + (RepairSize - RepairChecksumSize), RepairChecksumSize);
             }
 
             // Generate checksum

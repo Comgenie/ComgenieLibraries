@@ -28,7 +28,7 @@ namespace Comgenie.Storage
         /// <param name="shared">If set to true, this storage location can be used by multiple clients at the same time. Note that this can not be used for the primary storage location and will require a sync interval.</param>
         /// <param name="repairPercent">A percentage amount of repair data to be included, set to null to disable.</param>
         /// <param name="tagFilters">Optional, only store items with tags starting with one of these tag filters.</param>
-        public async Task AddStorageLocationAsync(IStorageLocation storageLocation, byte[] encryptionKey, int? syncInterval=null, int priority=1, bool shared=false, double? repairPercent=null, string[]? tagFilters=null)
+        public async Task AddStorageLocationAsync(IStorageLocation storageLocation, byte[] encryptionKey, int? syncInterval=null, int priority=1, bool shared=false, bool enableRepairData=false, string[]? tagFilters=null)
         {
             if (shared && !syncInterval.HasValue)
                 throw new ArgumentException("Shared cannot be set without sync interval.");
@@ -40,7 +40,7 @@ namespace Comgenie.Storage
                 SyncInterval = syncInterval,
                 Priority = priority,
                 Shared = shared,
-                RepairPercent = repairPercent,
+                EnableRepairData = enableRepairData,
                 TagFilters = tagFilters
             };
 
@@ -146,8 +146,8 @@ namespace Comgenie.Storage
 
                 if (includeData)
                 {
-                    using (var source = new EncryptedAndRepairableStream(sourceItem.StorageLocationInfo.Location.OpenFile(GetStorageItemFileName(sourceItem), FileMode.Open, FileAccess.Read), sourceItem.StorageLocationInfo.EncryptionKey, sourceItem.StorageLocationInfo.RepairPercent))
-                    using (var target = new EncryptedAndRepairableStream(targetLocationInfo.Location.OpenFile(GetStorageItemFileName(ourItem), FileMode.Create, FileAccess.Write), targetLocationInfo.EncryptionKey, targetLocationInfo.RepairPercent))
+                    using (var source = new EncryptedAndRepairableStream(sourceItem.StorageLocationInfo.Location.OpenFile(GetStorageItemFileName(sourceItem), FileMode.Open, FileAccess.Read), sourceItem.StorageLocationInfo.EncryptionKey, sourceItem.StorageLocationInfo.EnableRepairData))
+                    using (var target = new EncryptedAndRepairableStream(targetLocationInfo.Location.OpenFile(GetStorageItemFileName(ourItem), FileMode.Create, FileAccess.Write), targetLocationInfo.EncryptionKey, targetLocationInfo.EnableRepairData))
                     {
                         if (source != null && target != null)
                             await source.CopyToAsync(target);
@@ -370,7 +370,7 @@ namespace Comgenie.Storage
             if (fileStream == null)
                 return null;
 
-            var stream = new EncryptedAndRepairableStream(fileStream, storageLocation.EncryptionKey, storageLocation.RepairPercent);
+            var stream = new EncryptedAndRepairableStream(fileStream, storageLocation.EncryptionKey, storageLocation.EnableRepairData);
 
             stream.OnDispose = async (streamWasWrittenTo) =>
             {                

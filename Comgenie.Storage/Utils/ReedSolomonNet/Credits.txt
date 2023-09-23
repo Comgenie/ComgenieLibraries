@@ -1,0 +1,7 @@
+﻿The Reed Solomon code in this folder is taken from:
+https://github.com/egbakou/reedsolomon/tree/main
+
+Which is a port of the code distributed by Backblaze at:
+https://github.com/Backblaze/JavaReedSolomon
+
+The code in this folder is published under an MIT license. 
