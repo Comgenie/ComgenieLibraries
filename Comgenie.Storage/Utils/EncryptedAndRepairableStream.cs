@@ -9,8 +9,6 @@ using System.Xml.Linq;
 
 namespace Comgenie.Storage.Utils
 {
-    // TODO: Change to use https://github.com/egbakou/reedsolomon/tree/main  instead
-
     /// <summary>
     /// This this a stream which saves the data to the inner stream encrypted and optionally repairable
     /// It does it by storing data in same size chunks, with a small header for each chunk containing the IV
