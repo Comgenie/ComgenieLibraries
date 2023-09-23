@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
     <Title>Comgenie Storage</Title>
-    <Version>2023.4.16.1</Version>
+    <Version>2023.9.23.1</Version>
     <Authors>Comgenie</Authors>
     <Company>Comgenie</Company>
     <PackageProjectUrl>https://github.com/Comgenie/ComgenieLibraries</PackageProjectUrl>
