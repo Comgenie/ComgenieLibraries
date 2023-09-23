@@ -585,7 +585,7 @@ namespace Comgenie.Server.Handlers
                                             //i++; // We can ignore the next character (\n)
                                             //data.DataStream.ReadByte();
                                         }
-                                        else
+                                        else if (last3Bytes[2] != '\r' && last3Bytes[2] != '\n')
                                         {
                                             curData += Convert.ToChar(last3Bytes[2]);
                                         }
@@ -602,7 +602,7 @@ namespace Comgenie.Server.Handlers
                                             var formFieldName = Between(headerValue, "name=\"", "\"");
                                             if (formFieldName != null)
                                             {
-                                                if (headerValue.Contains("filename"))
+                                                if (headerValue.Contains("filename="))
                                                 {
                                                     // File upload
                                                     var headerValueFileName = headerValue.Substring(headerValue.IndexOf("filename=") + 9);
