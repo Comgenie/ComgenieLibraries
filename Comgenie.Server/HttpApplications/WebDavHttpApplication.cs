@@ -175,7 +175,10 @@ namespace Comgenie.Server.HttpApplications
             if (httpClientData.Method == "MKCOL")
             {
                 // Make folder/collection
-                var result = MakeCollection(authObject, httpClientData.RequestPageShort);
+                var folderPath = httpClientData.RequestPageShort;
+                if (folderPath.EndsWith("/"))
+                    folderPath = folderPath.Substring(0, folderPath.Length - 1);
+                var result = MakeCollection(authObject, folderPath);
                 if (!result)
                     return new HttpHandler.HttpResponse(409, new { Error = "Could not create folder" });
                 return new HttpHandler.HttpResponse(201, new { Success = true });
