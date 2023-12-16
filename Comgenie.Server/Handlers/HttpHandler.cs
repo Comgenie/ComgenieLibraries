@@ -191,14 +191,14 @@ namespace Comgenie.Server.Handlers
                                     }
 
                                 }
-                                else if (headerName == "" && data.IncomingBuffer[j] == ':')
+                                else if (headerName == "" && data.IncomingBuffer[j] == ':' && j > curLineStart)
                                 {
                                     // Got a header name
                                     headerName = ASCIIEncoding.ASCII.GetString(data.IncomingBuffer, curLineStart, j - curLineStart);
                                     curValueStart = j + 2;
                                     j++; // We can ignore the next character (space)
                                 }
-                                else if (data.IncomingBuffer[j] == '\r' && headerName != "") 
+                                else if (data.IncomingBuffer[j] == '\r' && headerName != "" && j > curValueStart) 
                                 {
                                     // Got a header value\
                                     var headerNameLower = headerName.ToLower();
@@ -219,7 +219,7 @@ namespace Comgenie.Server.Handlers
                                 data.ContentType = data.Headers["content-type"];
 
                             if (data.Headers.ContainsKey("content-length"))
-                                if (int.TryParse(data.Headers["content-length"], out int tmpContentLength))
+                                if (long.TryParse(data.Headers["content-length"], out long tmpContentLength))
                                     data.ContentLength = tmpContentLength;
                             
                             if (data.ContentLength > 0)
@@ -276,8 +276,8 @@ namespace Comgenie.Server.Handlers
                         if (data.IncomingBufferLength >= dataExpecting)
                         {
                             // There is more than or exactly the data waiting that we are expecting
-                            data.DataStream.Write(data.IncomingBuffer, 0, dataExpecting);
-                            data.IncomingBufferLength -= dataExpecting;
+                            data.DataStream.Write(data.IncomingBuffer, 0, (int)dataExpecting);
+                            data.IncomingBufferLength -= (int)dataExpecting;
                             data.DataLength = data.ContentLength;
                         }
                         else
@@ -294,15 +294,15 @@ namespace Comgenie.Server.Handlers
                         if (data.IncomingBufferLength >= dataExpecting)
                         {
                             // There is more than or exactly the data waiting that we are expecting
-                            Buffer.BlockCopy(data.IncomingBuffer, 0, data.Data, data.DataLength, dataExpecting);
-                            data.IncomingBufferLength -= dataExpecting;
+                            Buffer.BlockCopy(data.IncomingBuffer, 0, data.Data, (int)data.DataLength, (int)dataExpecting);
+                            data.IncomingBufferLength -= (int)dataExpecting;
                             data.DataLength = data.ContentLength;
-                            Buffer.BlockCopy(data.IncomingBuffer, dataExpecting, data.IncomingBuffer, 0, data.IncomingBufferLength); // Move the rest of the buffer to the front
+                            Buffer.BlockCopy(data.IncomingBuffer, (int)dataExpecting, data.IncomingBuffer, 0, data.IncomingBufferLength); // Move the rest of the buffer to the front
                         }
                         else
                         {
                             // There is less data waiting
-                            Buffer.BlockCopy(data.IncomingBuffer, 0, data.Data, data.DataLength, data.IncomingBufferLength);
+                            Buffer.BlockCopy(data.IncomingBuffer, 0, data.Data, (int)data.DataLength, data.IncomingBufferLength);
                             data.DataLength += data.IncomingBufferLength;
                             data.IncomingBufferLength = 0;
                         }
@@ -368,6 +368,15 @@ namespace Comgenie.Server.Handlers
             data.Request = System.Web.HttpUtility.UrlDecode(data.RequestRaw);
             Log.Debug(nameof(HttpHandler), "Got request from " + client.Socket?.RemoteEndPoint?.ToString() + " for " + data.Host + ": " + data.Request);
 
+            // TEMP Code
+            if (data.Request.ToLower().Contains(".php"))
+            {
+                Log.Warning(nameof(HttpHandler), "Added " + client.RemoteAddress + " to ban list");
+                Server.IPBanList.Add(client.RemoteAddress);
+                Server.SaveBanList();
+                return;
+            }
+
             // Find out what domain we are requesting
             data.Host = data.Host.ToLower();
             if (DomainAliases.ContainsKey(data.Host))
@@ -384,7 +393,7 @@ namespace Comgenie.Server.Handlers
             // All data received, we can respond!
             Route route = null;
             var routeKey = data.Host + data.RequestPage;
-            Log.Info(nameof(HttpHandler), "Full route lookup:" + data.Host + data.RequestPage);
+            Log.Info(nameof(HttpHandler), client.RemoteAddress +" - Full route lookup:" + data.Host + data.RequestPage);
             if (Routes.ContainsKey(routeKey))
             {
                 Log.Debug(nameof(HttpHandler), "Found exact match");
@@ -1134,14 +1143,14 @@ namespace Comgenie.Server.Handlers
             public string Host { get; set; }
             public Dictionary<string, string> Headers { get; set; } = new Dictionary<string, string>();
             public List<KeyValuePair<string, string>> FullRawHeaders { get; set; } = new List<KeyValuePair<string, string>>(); // Includes duplicates of header keys
-            public int ContentLength { get; set; }
+            public long ContentLength { get; set; }
             public byte[] IncomingBuffer { get; set; }
             public int IncomingBufferLength { get; set; }
             public string ContentType { get; set; }
             internal byte[] Data { get; set; }
             public Stream DataStream { get; set; }
             public string DataTempFileName { get; set; }
-            public int DataLength { get; set; }
+            public long DataLength { get; set; }
             public List<HttpClientFileData> FileData { get; set; }
             public Action<HttpClientData, byte, byte[], ulong, ulong> WebsocketFrameHandler { get; set; }
             public Action<HttpClientData> WebsocketDisconnectedHandler { get; set; }
