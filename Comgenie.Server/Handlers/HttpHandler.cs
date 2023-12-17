@@ -325,11 +325,6 @@ namespace Comgenie.Server.Handlers
                     try
                     {
                         ExecuteRequest(client, data);
-
-                        if (data.DataStream != null)
-                            data.DataStream.Close();
-                        if (data.DataTempFileName != null)
-                            File.Delete(data.DataTempFileName);
                     }
                     catch (Exception e)
                     {
@@ -343,6 +338,17 @@ namespace Comgenie.Server.Handlers
                         try
                         {
                             client.SendData(tmpResponse, 0, tmpResponse.Length);
+                        }
+                        catch { }
+                    }
+                    finally
+                    {
+                        try
+                        {
+                            if (data.DataStream != null)
+                                data.DataStream.Close();
+                            if (data.DataTempFileName != null)
+                                File.Delete(data.DataTempFileName);
                         }
                         catch { }
                     }
