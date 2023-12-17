@@ -7,6 +7,7 @@ using System.IO;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace Comgenie.Server
 {
@@ -42,7 +43,7 @@ namespace Comgenie.Server
             IncomingBuffers.Enqueue(new Tuple<byte[], int, Action>(data, dataLen, callBackFinished));
             var count = IncomingBuffers.Count;
 
-            WorkUtil.Do(() =>
+            Task.Run(() =>
             {
                 lock (IncomingBuffers)
                 {
