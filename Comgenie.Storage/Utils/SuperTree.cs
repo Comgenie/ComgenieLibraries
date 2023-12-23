@@ -247,13 +247,15 @@ namespace Comgenie.Storage.Utils
                 bool putInOtherGroup = false;
                 for (var j = 0; j < part.Length; j++)
                 {
-                    if (UnlikelyCharacters[part[j]] == 255) // Unlikely character
+                    var charValue = part[j];
+
+                    if (charValue > 0xFF || UnlikelyCharacters[charValue] == 255) // Unlikely character
                     {
                         putInOtherGroup = true;
                         break;
                     }
 
-                    var likelyCharIndex = UnlikelyCharacters[part[j]];
+                    var likelyCharIndex = UnlikelyCharacters[charValue];
                     number += likelyCharIndex * (int)Math.Pow(LikelyCharacterCount, j);
                 }
 
