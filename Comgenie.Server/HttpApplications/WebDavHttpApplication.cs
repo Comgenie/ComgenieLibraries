@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Web;
 using static Comgenie.Server.Handlers.HttpHandler;
 
 namespace Comgenie.Server.HttpApplications
@@ -361,7 +362,7 @@ namespace Comgenie.Server.HttpApplications
 
             if (path.Length > beforeRequestPageShort.Length)
                 path = path.Substring(beforeRequestPageShort.Length);
-            return path;
+            return HttpUtility.UrlDecode(path);
         }
 
 
