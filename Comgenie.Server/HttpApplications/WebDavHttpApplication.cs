@@ -218,7 +218,7 @@ namespace Comgenie.Server.HttpApplications
                         Console.WriteLine("Found with similar name: " + exi.Name);
                     // Not found
                     sb.AppendLine("<propfind xmlns=\"DAV:\">");
-                    sb.AppendLine("<href>" + GetApplicationRootUrl(httpClientData, true) + "</href>");
+                    sb.AppendLine("<href>" + HttpUtility.HtmlEncode(GetApplicationRootUrl(httpClientData, true)) + "</href>");
                     sb.AppendLine("<propstat>");
                     sb.AppendLine("<prop></prop>");
                     sb.AppendLine("<status>HTTP/1.1 404 NOT FOUND</status>");
@@ -275,12 +275,12 @@ namespace Comgenie.Server.HttpApplications
                     first = false;
                     
                     sb.AppendLine("<D:response>");
-                    sb.AppendLine("<D:href>" + GetApplicationRootUrl(httpClientData) + (folderToUse == "" ? "" : folderToUse + "/") + file.Name + "</D:href>");
+                    sb.AppendLine("<D:href>" + HttpUtility.HtmlEncode(GetApplicationRootUrl(httpClientData) + (folderToUse == "" ? "" : folderToUse + "/") + file.Name) + "</D:href>");
                     {
                         sb.AppendLine("<D:propstat>");
                         {
                             sb.AppendLine("<D:prop>");
-                            sb.AppendLine("<D:displayname>" + fileName + "</D:displayname>");
+                            sb.AppendLine("<D:displayname>" + HttpUtility.HtmlEncode(fileName) + "</D:displayname>");
                             if (!file.IsCollection)
                             {
                                 sb.AppendLine("<D:creationdate>" + file.LastModified.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss") + "+00:00</D:creationdate>");
