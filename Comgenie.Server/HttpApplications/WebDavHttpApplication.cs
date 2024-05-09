@@ -275,7 +275,7 @@ namespace Comgenie.Server.HttpApplications
                     first = false;
                     
                     sb.AppendLine("<D:response>");
-                    sb.AppendLine("<D:href>" + HttpUtility.HtmlEncode(GetApplicationRootUrl(httpClientData) + (folderToUse == "" ? "" : folderToUse + "/") + file.Name) + "</D:href>");
+                    sb.AppendLine("<D:href>" + HttpUtility.HtmlEncode(GetApplicationRootUrl(httpClientData) + (folderToUse == "" ? "" : folderToUse + "/") + file.Name).Replace(" ", "%20") + "</D:href>");
                     {
                         sb.AppendLine("<D:propstat>");
                         {
