@@ -24,8 +24,8 @@ namespace Comgenie.Server
     {
         public const int MaxPacketSize = 1024 * 32;
 
-        private string PfxKey = null;
-        public string DefaultDomain { get; set; }
+        private string? PfxKey = null;
+        public string? DefaultDomain { get; set; }
 
         // The server handler will listen to all ports, accept connections and handle SSL
         // It will then forward the data to any connectionhandlers attached
@@ -33,13 +33,13 @@ namespace Comgenie.Server
         private static Dictionary<string, X509Certificate> ServerCertificates = new Dictionary<string, X509Certificate>();
         public static HashSet<string> IPBanList = new HashSet<string>();
 
-        private static List<Server> ActiveInstances { get; set; }
-        private static Thread CleanUpThread { get; set; }
+        private static List<Server>? ActiveInstances { get; set; }
+        private static Thread? CleanUpThread { get; set; }
         public HashSet<string> Domains { get; set; }
         
         public bool IsActive = true;
-        private ConcurrentStack<byte[]> Buffers = new ConcurrentStack<byte[]>();
-        private List<Client> Clients = new List<Client>();
+        public ConcurrentStack<byte[]> Buffers = new ConcurrentStack<byte[]>();
+        public List<Client> Clients = new List<Client>();
         
         public static void SaveBanList()
         {            
@@ -48,7 +48,11 @@ namespace Comgenie.Server
         public static void LoadBanList()
         {
             if (File.Exists("IPBanList.json"))
-                IPBanList = JsonSerializer.Deserialize<HashSet<string>>(File.ReadAllText("IPBanList.json"));           
+            {
+                var ipBanList = JsonSerializer.Deserialize<HashSet<string>>(File.ReadAllText("IPBanList.json"));
+                if (ipBanList != null)
+                    IPBanList = ipBanList;
+            }
         }
 
         public Server()
@@ -60,7 +64,7 @@ namespace Comgenie.Server
                 CleanUpThread = new Thread(new ThreadStart(() => {
                     while (true)
                     {
-                        List<Server> instances = null;
+                        List<Server>? instances = null;
 
                         lock (ActiveInstances)
                             instances = ActiveInstances.ToList();
@@ -124,12 +128,12 @@ namespace Comgenie.Server
         {
             this.PfxKey = newKey;
         }
-        internal string GetPfxKey()
+        internal string? GetPfxKey()
         {
             return this.PfxKey;
         }
 
-        public void Listen(int port, bool ssl, IConnectionHandler handler, int maxProcessingQueue = 10)
+        public void Listen(int port, bool ssl, IConnectionHandler handler)
         {
             LoadBanList();
 
@@ -137,16 +141,7 @@ namespace Comgenie.Server
             listenSocket.Bind(new IPEndPoint(IPAddress.Any, port));
             listenSocket.Listen(1024);
 
-            if (handler is SmtpHandler || handler is ImapHandler)
-                maxProcessingQueue = 1; // We have to stop any NetworkStream reads while handling commands, otherwise STARTTLS cannot work in C#
-
-            Handlers.Add(listenSocket, new ServerProtocol()
-            {
-                Port = port,
-                Handler = handler,
-                Ssl = ssl,
-                MaxProcessingQueue = maxProcessingQueue
-            });
+            Handlers.Add(listenSocket, new ServerProtocol(handler, port, ssl, (handler is SmtpHandler || handler is ImapHandler)));
 
             var acceptThread = new Thread(new ThreadStart(() =>
             {
@@ -157,7 +152,7 @@ namespace Comgenie.Server
                         var clientSocket = listenSocket.Accept();
                         if (clientSocket == null)
                             break;
-                        InitConnection(listenSocket, clientSocket);
+                        _ = InitConnection(listenSocket, clientSocket);
                     }
                     catch (Exception ex)
                     {
@@ -168,10 +163,20 @@ namespace Comgenie.Server
             acceptThread.Start();
         }
 
-        void InitConnection(Socket listenSocket, Socket clientSocket)
+        async Task InitConnection(Socket listenSocket, Socket clientSocket)
         {                        
-            var remoteEndPoint = ((IPEndPoint)clientSocket.RemoteEndPoint);
+            var remoteEndPoint = ((IPEndPoint?)clientSocket.RemoteEndPoint);
+            if (remoteEndPoint == null)
+            {
+                Log.Info(nameof(Server), "Socket might not be connected anymore");
+                try
+                {
+                    clientSocket.Close();
+                }
+                catch { }
 
+                return;
+            }
             var clientIp = remoteEndPoint.Address.ToString();
 
             if (IPBanList.Contains(clientIp))
@@ -188,7 +193,7 @@ namespace Comgenie.Server
                 Server = this,
                 Socket = clientSocket,
                 Handler = protocol.Handler,
-                MaxProcessingCount = protocol.MaxProcessingQueue,
+                ReadOneByOne = protocol.ReadOneByOne,
                 ConnectMoment = DateTime.UtcNow,
                 LastDataReceivedMoment = DateTime.UtcNow,
                 LastDataSentMoment = DateTime.UtcNow,
@@ -206,11 +211,12 @@ namespace Comgenie.Server
             {
                 client.Stream = client.NetworkStream;
                 client.StreamIsReady = true; // No handshake required
-                client.Handler.ClientConnect(client);
-                StartReadTask(client);
+                await client.Handler.ClientConnect(client);
+                _ = client.Read();
+                //StartReadTask(client);
             }
         }
-        public void StartReadTask(Client client)
+        /*public void StartReadTask(Client client)
         {                       
             var clientSocket = client.Socket;
             var task = Task.Run(async () =>
@@ -278,7 +284,7 @@ namespace Comgenie.Server
 
                 Log.Debug(nameof(Server), "[ReadTask] Stopping to handle client (Client connected " + clientSocket.Connected + ")");
 
-                client.Disconnect();
+                await client.Disconnect();
 
                 lock (Clients)
                     Clients.Remove(client);
@@ -288,16 +294,16 @@ namespace Comgenie.Server
 
             lock (Clients)
                 Clients.Add(client);
-        }
-        public void EnableSSLOnClient(Client client, string preferDomain=null, Action callBackStreamReadingStopped = null)
+        }*/
+        public void EnableSSLOnClient(Client client, string? preferDomain=null, Action? callBackStreamReadingStopped = null)
         {
             var isUpgradedConnection = client.Stream != null;
 
             var certificateSelection = new ServerCertificateSelectionCallback((sender, hostName) =>
             {
                 if (ServerCertificates.Count == 0)
-                    return null;
-                if (ServerCertificates.ContainsKey(hostName))
+                    return null!;
+                if (hostName != null && ServerCertificates.ContainsKey(hostName))
                     return ServerCertificates[hostName];
                 if (preferDomain != null && ServerCertificates.ContainsKey(preferDomain))
                     return ServerCertificates[preferDomain];
@@ -326,11 +332,11 @@ namespace Comgenie.Server
                 callBackStreamReadingStopped();
             
             
-            var ssl = new SslStream(client.NetworkStream, false);
+            var ssl = new SslStream(client.NetworkStream!, false);
             client.Stream = ssl;
             client.StreamIsEncrypted = true;
 
-            var myTask = Task.Run(() =>
+            var myTask = Task.Run(async () =>
             {
                 Log.Debug(nameof(Server), "Run task SSL");
                 Stopwatch sw = new Stopwatch();
@@ -343,7 +349,7 @@ namespace Comgenie.Server
                     allowedCipherSuite.Add(TlsCipherSuite.TLS_DHE_RSA_WITH_AES_256_GCM_SHA384);
                     allowedCipherSuite.Add(TlsCipherSuite.TLS_DHE_RSA_WITH_AES_128_GCM_SHA256); */
                     client.Stream.ReadTimeout = 10000;                    
-                    ssl.AuthenticateAsServer(new SslServerAuthenticationOptions()
+                    await ssl.AuthenticateAsServerAsync(new SslServerAuthenticationOptions()
                     {
                         ServerCertificateSelectionCallback = certificateSelection,
                         EnabledSslProtocols = System.Security.Authentication.SslProtocols.Tls13 | System.Security.Authentication.SslProtocols.Tls12 /*| System.Security.Authentication.SslProtocols.Tls11*/,
@@ -358,7 +364,15 @@ namespace Comgenie.Server
                     {
                         ssl.Close();
                         // Disconnect client
-                        client.Socket.Close();
+                        if (isUpgradedConnection)
+                        {
+                            await client.Disconnect();
+                        }
+                        else if (client.Socket != null)
+                        {
+                            client.Socket.Close();
+                        }
+                        //client.Socket.Close();
                     }
                     catch { }
 
@@ -370,8 +384,9 @@ namespace Comgenie.Server
 
                 if (!isUpgradedConnection)
                 {
-                    client.Handler.ClientConnect(client);
-                    StartReadTask(client);
+                    await client.Handler.ClientConnect(client);
+                    // StartReadTask(client);
+                    _ = client.Read();
                 }                
             });
         }
@@ -398,31 +413,38 @@ namespace Comgenie.Server
         {
             var inactiveMoment = DateTime.UtcNow.AddSeconds(-noActivitySeconds);
 
-            List<Client> inactiveClients = null;
+            List<Client>? inactiveClients = null;
             lock (Clients)
                 inactiveClients = Clients.Where(c => c.LastDataReceivedMoment < inactiveMoment && c.LastDataSentMoment < inactiveMoment).ToList();
 
             foreach (var client in inactiveClients)
-                client.Disconnect(); // This stops all read tasks
+                client.Disconnect().Wait(); // This stops all read tasks
         }
         public void Dispose()
         {
             IsActive = false;
-            lock (ActiveInstances)
+            lock (ActiveInstances!)
                 ActiveInstances.Remove(this);
 
             foreach (var listenSocket in Handlers)
                 listenSocket.Key.Close(); // Stop accepting new connections
             foreach (var client in Clients)
-                client.Disconnect(); // This stops all read tasks            
+                client.Disconnect().Wait(); // This stops all read tasks            
         }
 
         class ServerProtocol
         {
             public int Port { get; set; }
             public bool Ssl { get; set; }
-            public int MaxProcessingQueue { get; set; }
+            public bool ReadOneByOne { get; set; }
             public IConnectionHandler Handler { get; set; }
+            public ServerProtocol(IConnectionHandler handler, int port, bool ssl = false, bool readOneByOne = false)
+            {
+                Port = port;
+                Ssl = ssl;
+                ReadOneByOne = readOneByOne;
+                Handler = handler;
+            }
         }
     }
 }

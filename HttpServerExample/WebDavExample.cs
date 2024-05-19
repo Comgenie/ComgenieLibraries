@@ -20,7 +20,7 @@ namespace HttpServerExample
             return true;
         }
 
-        public override WebDavFileContent? GetFile(object authObject, string path)
+        public override WebDavFileContent GetFile(object authObject, string path)
         {
             if (path == "Example Folder/Example File.txt")
             {
@@ -31,7 +31,7 @@ namespace HttpServerExample
             }
             return null;
         }
-        public override WebDavFileInfo? GetFileInfo(object authObject, string path)
+        public override WebDavFileInfo GetFileInfo(object authObject, string path)
         {
             if (path == "Example Folder/Example File.txt")
             {

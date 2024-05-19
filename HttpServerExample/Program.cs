@@ -29,26 +29,27 @@ namespace HttpServerExample
                 http.AddApplicationRoute(domain, "/app", new App(), lowerCaseMethods: false);
 
                 // Reverse proxy route
-                // http.AddProxyRoute(domain, "/proxy", "https://...")
+                //http.AddProxyRoute(domain, "/proxy/*", "https://comgenie.com/");
 
                 // Websocket route
                 http.AddWebsocketRoute(domain, "/websocket",
-                    connectHandler: (client) =>
+                    connectHandler: async (client) =>
                     {
                         Console.WriteLine("Websocket client connected");
-                        client.SendWebsocketText("Welcome " + client.Client.RemoteAddress);
+                        await client.SendWebsocketText("Welcome " + client.Client.RemoteAddress);
                     },
-                    messageReceivedHandler: (client, opcode, buffer, offset, len) =>
+                    messageReceivedHandler: async (client, opcode, buffer, offset, len) =>
                     {
                         if (opcode == 1) // text
                         {
                             var str = Encoding.UTF8.GetString(buffer, (int)offset, (int)len);
-                            client.SendWebsocketText(str.ToUpper());
+                            await client.SendWebsocketText(str.ToUpper());
                         }
                     },
                     disconnectHandler: (client) =>
                     {
                         Console.WriteLine("Websocket client disconnected");
+                        return Task.CompletedTask;
                     }
                 );
 

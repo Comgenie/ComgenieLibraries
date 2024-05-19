@@ -388,41 +388,41 @@ namespace Comgenie.Server.Utils
 
         class AccountSettings
         {
-            public string Email { get; set; }
-            public byte[] RSAKey { get; set; } 
-            public string KeyId { get; set; } 
+            public string? Email { get; set; }
+            public byte[]? RSAKey { get; set; } 
+            public string? KeyId { get; set; } 
         }
 
         /* JWS Message stuff */
         class Jwk
         {
-            public string Kty { get; set; } // KeyType
-            public string Kid { get; set; } // KeyId 
-            public string Use { get; set; }
-            public string N { get; set; } // Modulus
-            public string E { get; set; } // Exponent
-            public string D { get; set; }
-            public string P { get; set; }
-            public string Q { get; set; }
-            public string Dp { get; set; }
-            public string Dq { get; set; }
-            public string Qi { get; set; } // InverseQ
-            public string Alg { get; set; } // Algorithm
+            public string? Kty { get; set; } // KeyType
+            public string? Kid { get; set; } // KeyId 
+            public string? Use { get; set; }
+            public string? N { get; set; } // Modulus
+            public string? E { get; set; } // Exponent
+            public string? D { get; set; }
+            public string? P { get; set; }
+            public string? Q { get; set; }
+            public string? Dp { get; set; }
+            public string? Dq { get; set; }
+            public string? Qi { get; set; } // InverseQ
+            public string? Alg { get; set; } // Algorithm
         }
         class JwsMessage
         {
             //public JwsMessageHeader Header { get; set; }
-            public string Protected { get; set; }
-            public string Payload { get; set; }
-            public string Signature { get; set; }
+            public string? Protected { get; set; }
+            public string? Payload { get; set; }
+            public string? Signature { get; set; }
         }
         class JwsMessageHeader
         {
-            public string Alg { get; set; } // Algorithm
-            public Jwk Jwk { get; set; }
-            public string Kid { get; set; } // KeyId 
-            public string Nonce { get; set; }
-            public string Url { get; set; }
+            public string? Alg { get; set; } // Algorithm
+            public Jwk? Jwk { get; set; }
+            public string? Kid { get; set; } // KeyId 
+            public string? Nonce { get; set; }
+            public string? Url { get; set; }
         }
 
     }

@@ -13,6 +13,7 @@ using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Xml.Linq;
 
 namespace Comgenie.Server.Handlers
@@ -21,28 +22,30 @@ namespace Comgenie.Server.Handlers
     {
         internal Dictionary<string, Route> Routes = new Dictionary<string, Route>();
         private Dictionary<string, string> DomainAliases = new Dictionary<string, string>(); // Alias domain -> main domain        
-        private List<Action<HttpClientData, HttpResponse>> PostProcessors = null;
+        private List<Action<HttpClientData, HttpResponse>>? PostProcessors = null;
 
         // Enable GZip compression for static text files 
         public string[] EnableGZipCompressionContentTypes = new string[] { "text/plain", "application/json", "text/html", "image/svg+xml", "application/xml", "text/css", "text/javascript" };
 
-        public void ClientConnect(Client client)
+        public Task ClientConnect(Client client)
         {
             client.Data = new HttpClientData()
             {
                 Client = client,
                 IncomingBuffer = new byte[1024*514]
             };
+            return Task.CompletedTask;
         }
 
-        public void ClientDisconnect(Client client)
+        public async Task ClientDisconnect(Client client)
         {
             if (client.Data == null)
                 return;
             var data = (HttpClientData)client.Data;
             if (data.WebsocketDisconnectedHandler != null)
-                data.WebsocketDisconnectedHandler(data);
+                await data.WebsocketDisconnectedHandler(data);
         }
+
         public void AddPostProcessor(Action<HttpClientData, HttpResponse> postProcessor)
         {
             if (PostProcessors == null)
@@ -61,9 +64,9 @@ namespace Comgenie.Server.Handlers
                 DomainAliases[aliasDomain] = mainDomain;
         }
 
-        public void ClientReceiveData(Client client, byte[] buffer, int len)
+        public async Task ClientReceiveData(Client client, byte[] buffer, int len)
         {
-            var data = (HttpClientData)client.Data;
+            var data = (HttpClientData?)client.Data;
             
             if (data == null || data.IncomingBufferLength + len > data.IncomingBuffer.Length)
                 return; // Buffer too small
@@ -135,17 +138,17 @@ namespace Comgenie.Server.Handlers
                         // Got all data in offset, with msglen
                         if (opcode == 0x09) // ping
                         {
-                            data.SendWebsocketMessage(0x0A, data.IncomingBuffer, offset, msglen);
+                            await data.SendWebsocketMessage(0x0A, data.IncomingBuffer, offset, msglen);
                         }
                         else if (opcode == 0x01 || opcode == 0x02) // 0x01 text or 0x02 binary
                         {
-                            data.WebsocketFrameHandler(data, (byte)opcode, data.IncomingBuffer, offset, msglen);
+                            await data.WebsocketFrameHandler(data, (byte)opcode, data.IncomingBuffer, offset, msglen);
                         }
                         else if (opcode == 0x08) // closing
                         {
                             // TODO, body contents is reason of closing
                             // Just echo for now
-                            data.SendWebsocketMessage(0x08, data.IncomingBuffer, offset, msglen);
+                            await data.SendWebsocketMessage(0x08, data.IncomingBuffer, offset, msglen);
                         }
                         else
                         {
@@ -270,25 +273,25 @@ namespace Comgenie.Server.Handlers
                     // Add to the buffer
                     var dataExpecting = data.ContentLength - data.DataLength;
 
-                    if (data.Data == null)
+                    if (data.DataStream != null)
                     {
                         // Stream to file
                         if (data.IncomingBufferLength >= dataExpecting)
                         {
                             // There is more than or exactly the data waiting that we are expecting
-                            data.DataStream.Write(data.IncomingBuffer, 0, (int)dataExpecting);
+                            await data.DataStream.WriteAsync(data.IncomingBuffer, 0, (int)dataExpecting);
                             data.IncomingBufferLength -= (int)dataExpecting;
                             data.DataLength = data.ContentLength;
                         }
                         else
                         {
                             // There is less data waiting
-                            data.DataStream.Write(data.IncomingBuffer, 0, data.IncomingBufferLength);
+                            await data.DataStream.WriteAsync(data.IncomingBuffer, 0, data.IncomingBufferLength);
                             data.DataLength += data.IncomingBufferLength;
                             data.IncomingBufferLength = 0;
                         }
                     }
-                    else 
+                    else if (data.Data != null)
                     {   
                         // Add to byte array
                         if (data.IncomingBufferLength >= dataExpecting)
@@ -324,7 +327,7 @@ namespace Comgenie.Server.Handlers
 
                     try
                     {
-                        ExecuteRequest(client, data);
+                        await ExecuteRequest(client, data);
                     }
                     catch (Exception e)
                     {
@@ -337,7 +340,7 @@ namespace Comgenie.Server.Handlers
                         var tmpResponse = ASCIIEncoding.ASCII.GetBytes("HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\nContent-Length: "+ content.Length+"\r\n\r\n" + content);
                         try
                         {
-                            client.SendData(tmpResponse, 0, tmpResponse.Length);
+                            await client.SendData(tmpResponse, 0, tmpResponse.Length);
                         }
                         catch { }
                     }
@@ -360,6 +363,8 @@ namespace Comgenie.Server.Handlers
                     data.ContentType = null;
                     data.DataLength = 0;
                     data.Data = null;
+                    data.Host = "";
+                    data.Method = null;
                     data.DataTempFileName = null;
                     data.DataStream = null;
                     data.Headers.Clear();
@@ -369,10 +374,13 @@ namespace Comgenie.Server.Handlers
             }
         }
 
-        private void ExecuteRequest(Client client, HttpClientData data)
+        private async Task ExecuteRequest(Client client, HttpClientData data)
         {
             data.Request = System.Web.HttpUtility.UrlDecode(data.RequestRaw);
             Log.Debug(nameof(HttpHandler), "Got request from " + client.Socket?.RemoteEndPoint?.ToString() + " for " + data.Host + ": " + data.Request);
+
+            if (data.Request == null || data.RequestRaw == null)
+                return;
 
             // TEMP Code
             if (data.Request.ToLower().Contains(".php"))
@@ -388,16 +396,16 @@ namespace Comgenie.Server.Handlers
             if (DomainAliases.ContainsKey(data.Host))
                 data.Host = DomainAliases[data.Host];
             if (client.Server != null && !client.Server.Domains.Contains(data.Host))
-                data.Host = client.Server.DefaultDomain;
+                data.Host = client.Server.DefaultDomain ?? data.Host;
             Log.Debug(nameof(HttpHandler), "Using host " + data.Host);
 
-            HttpResponse response = null;
+            HttpResponse? response = null;
             // Query string without parameters
             var parameterStart = data.Request.IndexOf("?");
             data.RequestPage = parameterStart > 0 ? data.Request.Substring(0, parameterStart) : data.Request;
 
             // All data received, we can respond!
-            Route route = null;
+            Route? route = null;
             var routeKey = data.Host + data.RequestPage;
             Log.Info(nameof(HttpHandler), client.RemoteAddress +" - Full route lookup:" + data.Host + data.RequestPage);
             if (Routes.ContainsKey(routeKey))
@@ -433,9 +441,9 @@ namespace Comgenie.Server.Handlers
                         Data = route.Contents                        
                     };
                 }
-                else if (route.LocalPath != null)
+                else if (route.LocalPath != null && data.RequestPageShort != null)
                 {
-                    string requestedFile = null;
+                    string? requestedFile = null;
                     if (Directory.Exists(route.LocalPath)) // Route is linking to a directory
                     {
                         // Combine our LocalPath with RequestPageShort to see if the request points to a file
@@ -479,7 +487,7 @@ namespace Comgenie.Server.Handlers
                         };
                     }
                 }
-                else if (route.Application != null && route.ApplicationMethod != null) 
+                else if (route.Application != null && route.ApplicationMethod != null && route.ApplicationMethodParameters != null) 
                 {                    
                     // Parse arguments
                     Dictionary<string, string> rawParameters = new Dictionary<string, string>();
@@ -503,17 +511,17 @@ namespace Comgenie.Server.Handlers
                                     foreach (var item in items)
                                     {
                                         if (item.Value != null)
-                                            rawParameters.Add(item.Key, item.Value.ToString());
+                                            rawParameters.Add(item.Key, item.Value.ToString()!);
                                     }
                                 }
                             }
                             catch { }
                         }
-                        else if (data?.ContentType == "application/x-www-form-urlencoded" && data.DataLength < 1024*1024*100)
+                        else if (data.ContentType == "application/x-www-form-urlencoded" && data.DataLength < 1024*1024*100)
                         {
                             // Parse as normal=query&string=parameters
                             using (var sr = new StreamReader(data.DataStream, Encoding.UTF8, leaveOpen: true))
-                                GetParametersFromQueryString(rawParameters, sr.ReadToEnd());
+                                GetParametersFromQueryString(rawParameters, await sr.ReadToEndAsync());
                         }
                         else if (data.ContentType != null && data.ContentType.StartsWith("multipart/form-data; boundary=")) // Usually a file upload, but can be form data as well
                         {
@@ -609,7 +617,7 @@ namespace Comgenie.Server.Handlers
                                     if (headers.Count > 0)
                                     {
                                         var skipFileData = false;
-                                        string fileName = null;
+                                        string? fileName = null;
                                         // See if this is a form element, or a file upload
                                         if (headers.ContainsKey("content-disposition"))
                                         {
@@ -647,14 +655,7 @@ namespace Comgenie.Server.Handlers
                                         
                                         if (!skipFileData)
                                         {
-                                            data.FileData.Add(new HttpClientFileData()
-                                            {
-                                                Headers = headers,
-                                                FileName = fileName,
-                                                DataFrom = startContent,
-                                                DataLength = endContent - startContent,
-                                                DataStream = data.DataStream
-                                            });
+                                            data.FileData.Add(new HttpClientFileData(fileName, startContent, endContent - startContent, headers, data.DataStream));
                                         }
                                     }
 
@@ -667,12 +668,12 @@ namespace Comgenie.Server.Handlers
                         data.DataStream.Position = 0;
                     }
 
-                    var paramValues = new List<object>();
+                    var paramValues = new List<object?>();
                     foreach (var param in route.ApplicationMethodParameters)
                     {
                         if (param.ParameterType == typeof(HttpClientData))
                             paramValues.Add(data);
-                        else if (rawParameters.ContainsKey(param.Name))
+                        else if (param.Name != null && rawParameters.ContainsKey(param.Name))
                         {
                             if (param.ParameterType == typeof(string))
                                 paramValues.Add(rawParameters[param.Name]);
@@ -705,7 +706,35 @@ namespace Comgenie.Server.Handlers
                         else
                             paramValues.Add(null);
                     }
-                    response = (HttpResponse)route.ApplicationMethod.Invoke(route.Application, paramValues.ToArray());
+                    var responseObj = route.ApplicationMethod.Invoke(route.Application, paramValues.ToArray());
+                    if (responseObj is Task)
+                    {
+                        await Task.WhenAll((Task)responseObj);
+                        if (responseObj is Task<HttpResponse>)
+                            responseObj = ((Task<HttpResponse>)responseObj).Result;
+                        else if (responseObj is Task<HttpResponse?>)
+                            responseObj = ((Task<HttpResponse?>)responseObj).Result;
+                        else
+                        {
+                            var resultProperty = ((Task)responseObj).GetType().GetProperty("Result"); // TODO: See if we can skip this reflection step for better performance
+                            if (resultProperty != null)
+                                responseObj = resultProperty.GetValue(responseObj);
+                            else
+                                responseObj = null;
+                        }
+                    }                    
+                    
+                    if (responseObj is HttpResponse)
+                    {
+                        response = (HttpResponse?)responseObj;
+                    }
+                    else if (responseObj != null)
+                    {
+                        response = new HttpResponse()
+                        {
+                            ResponseObject = responseObj
+                        };
+                    }                    
                 }
                 else if (route.Proxy != null)
                 {
@@ -716,10 +745,9 @@ namespace Comgenie.Server.Handlers
                         if (tmpRoutePrefix.EndsWith("/*"))
                             tmpRoutePrefix = tmpRoutePrefix.Substring(0, tmpRoutePrefix.Length - 2);
 
-
                         // Build request
                         StringBuilder request = new StringBuilder();
-                        request.AppendLine(data.Method + " /"+ data.RequestRaw.Substring(tmpRoutePrefix.Length + 1) + " HTTP/1.1"); // TODO: Remove any folder in our routing path
+                        request.AppendLine(data.Method + " /" + data.RequestRaw.Substring(tmpRoutePrefix.Length).Replace("*", "") + " HTTP/1.1"); // TODO: Remove any folder in our routing path
                         request.AppendLine("Host: " + new Uri(route.Proxy).Host);
                         if (route.ShouldSendForwardHeaders)
                         {
@@ -739,26 +767,26 @@ namespace Comgenie.Server.Handlers
                         }
                         request.AppendLine();                        
 
-                        using (var responseStream = SharedTcpClient.ExecuteHttpRequest(route.Proxy, request.ToString(), data.DataStream))
+                        using (var responseStream = await SharedTcpClient.ExecuteHttpRequest(route.Proxy, request.ToString(), data.DataStream))
                         {
                             var intercept = route.ProxyShouldInterceptHandler != null && route.ProxyInterceptHandler != null && route.ProxyShouldInterceptHandler(data.Request, responseStream.ResponseHeaders);
 
                             if (intercept)
                             {                                
                                 var content = new StreamReader(responseStream, Encoding.UTF8).ReadToEnd();
-                                var newContent = route.ProxyInterceptHandler(data.Request, responseStream.ResponseHeaders, content);
+                                var newContent = route.ProxyInterceptHandler!(data.Request, responseStream.ResponseHeaders, content);
                                 var newResponseHeaders = string.Join("\r\n", responseStream.ResponseHeaders
                                     .Split(new String[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries)
                                     .Where(a=> !a.StartsWith("Content-Length:") && !a.StartsWith("Transfer-Encoding:")));
                                 
-                                client.SendString(newResponseHeaders+ "\r\nContent-Length: " + newContent.Length + "\r\n\r\n");
-                                client.SendString(newContent, Encoding.UTF8);
+                                await client.SendString(newResponseHeaders+ "\r\nContent-Length: " + newContent.Length + "\r\n\r\n");
+                                await client.SendString(newContent, Encoding.UTF8);
                             }
                             else
                             {
                                 responseStream.IncludeChunkedHeadersInResponse = true;
-                                client.SendString(responseStream.ResponseHeaders);
-                                client.SendStream(responseStream, 0, -1);
+                                await client.SendString(responseStream.ResponseHeaders);
+                                await client.SendStream(responseStream, 0, -1);
                             }
                         }
                         return;
@@ -778,7 +806,7 @@ namespace Comgenie.Server.Handlers
                 {
                     try
                     { 
-                        route.CustomHandler(client, data);
+                        await route.CustomHandler(client, data);
                         return;
                     }
                     catch (Exception e)
@@ -874,7 +902,7 @@ namespace Comgenie.Server.Handlers
                     //response.GZipResponse = EnableGZipCompressionContentTypes != null && EnableGZipCompressionContentTypes.Contains(Path.GetExtension(response.FileName).ToLower());
                     response.Headers.Add("Cache-Control", "public, max-age=86400");
                 }
-                response.ContentType = (route.ContentType ?? ContentTypeUtil.GetContentTypeFromFileName(response.FileName));
+                response.ContentType = (route?.ContentType ?? ContentTypeUtil.GetContentTypeFromFileName(response.FileName));
 
                 // Allow ranges
                 response.Headers.Add("Accept-Ranges", "bytes");
@@ -956,7 +984,7 @@ namespace Comgenie.Server.Handlers
             if (data.Method == "HEAD")
             {
                 // Just return the headers
-                client.SendData(tmpResponseHeader, 0, tmpResponseHeader.Length);
+                await client.SendData(tmpResponseHeader, 0, tmpResponseHeader.Length);
 
                 if (response.Stream != null)
                 {
@@ -975,26 +1003,26 @@ namespace Comgenie.Server.Handlers
                 var tmpResponse = new byte[tmpResponseHeader.Length + response.Data.Length];
                 Buffer.BlockCopy(tmpResponseHeader, 0, tmpResponse, 0, tmpResponseHeader.Length);
                 Buffer.BlockCopy(response.Data, 0, tmpResponse, tmpResponseHeader.Length, response.Data.Length);
-                client.SendData(tmpResponse, 0, tmpResponse.Length);
+                await client.SendData(tmpResponse, 0, tmpResponse.Length);
             }
             else if (response.Stream != null)
             {
-                client.SendData(tmpResponseHeader, 0, tmpResponseHeader.Length, false);
-                client.SendStream(response.Stream, response.ContentOffsetStream, response.ContentLengthStream);
+                await client.SendData(tmpResponseHeader, 0, tmpResponseHeader.Length, false);
+                await client.SendStream(response.Stream, response.ContentOffsetStream, response.ContentLengthStream);
             }
             else
             {
-                client.SendData(tmpResponseHeader, 0, tmpResponseHeader.Length); // Empty
+                await client.SendData(tmpResponseHeader, 0, tmpResponseHeader.Length); // Empty
             }
 
 
             if (data.WebsocketFrameHandler != null && route != null && route.WebsocketConnectHandler != null)
             {
                 // This request is upgraded to a websocket connection, execute callback handler
-                route.WebsocketConnectHandler(data);
+                await route.WebsocketConnectHandler(data);
             }
         }
-        private string Between(string txt, string start, string end)
+        private string? Between(string txt, string start, string end)
         {
             var pos = txt.IndexOf(start);
             if (pos < 0)
@@ -1008,7 +1036,7 @@ namespace Comgenie.Server.Handlers
         private void GetParametersFromQueryString(Dictionary<string, string> resultDict, string queryString)
         {
             var curPos = 0;
-            string name = null;
+            string? name = null;
             while (curPos < queryString.Length)
             {
                 var nextPos = queryString.IndexOf(name == null ? "=" : "&", curPos);
@@ -1039,7 +1067,7 @@ namespace Comgenie.Server.Handlers
             }
         }
 
-        public void AddFileRoute(string domain, string path, string localPath, string contentType)
+        public void AddFileRoute(string domain, string path, string localPath, string? contentType)
         {            
             AddRoute(domain, path, new Route()
             {
@@ -1047,7 +1075,7 @@ namespace Comgenie.Server.Handlers
                 LocalPath = localPath
             });
         }
-        public void AddProxyRoute(string domain, string path, string targetUrl, Func<string, string, bool> shouldInterceptHandler = null, Func<string, string, string, string> interceptHandler=null, bool shouldSendForwardHeaders=true)
+        public void AddProxyRoute(string domain, string path, string targetUrl, Func<string, string, bool>? shouldInterceptHandler = null, Func<string, string, string, string>? interceptHandler=null, bool shouldSendForwardHeaders=true)
         {
             AddRoute(domain, path, new Route()
             {
@@ -1065,13 +1093,16 @@ namespace Comgenie.Server.Handlers
                 Contents = contents
             });
         }
-        public void AddApplicationRoute(string domain, string path, object httpApplication, bool lowerCaseMethods=true)
+        public void AddApplicationRoute(string domain, string path, object httpApplication, bool lowerCaseMethods=true, bool allPublicMethods=false)
         {
             // Add all methods of the given httpApplication class as seperate routes. The 'Other' method will be used if no suitable methods are found for a request.
-            var publicMethods = httpApplication.GetType().GetMethods(BindingFlags.Public| BindingFlags.Instance);
+            var publicMethods = httpApplication.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance);
+            var ignoreMethods = typeof(object).GetMethods(BindingFlags.Public | BindingFlags.Instance).Select(a => a.Name).ToArray();
             foreach (var method in publicMethods)
             {
-                if (method.ReturnType != typeof(HttpResponse))
+                if (allPublicMethods && (ignoreMethods.Contains(method.Name) || method.ReturnType == typeof(void)))
+                    continue;
+                if (!allPublicMethods && method.ReturnType != typeof(HttpResponse) && method.ReturnType != typeof(Task<HttpResponse>) && method.ReturnType != typeof(Task<HttpResponse?>))
                     continue;
                 AddRoute(domain, path + (method.Name == "Index" ? "" : method.Name == "Other" ? "/*" : "/"+(lowerCaseMethods ? method.Name.ToLower() : method.Name)), new Route()
                 {
@@ -1081,7 +1112,7 @@ namespace Comgenie.Server.Handlers
                 });
             }            
         }
-        public void AddWebsocketRoute(string domain, string path, Action<HttpClientData, byte, byte[], ulong, ulong> messageReceivedHandler, Action<HttpClientData> connectHandler=null, Action<HttpClientData> disconnectHandler = null)
+        public void AddWebsocketRoute(string domain, string path, Func<HttpClientData, byte, byte[], ulong, ulong, Task> messageReceivedHandler, Func<HttpClientData, Task>? connectHandler=null, Func<HttpClientData, Task>? disconnectHandler = null)
         {
             AddRoute(domain, path, new Route()
             {
@@ -1090,7 +1121,7 @@ namespace Comgenie.Server.Handlers
                 WebsocketDisconnectHandler = disconnectHandler
             });
         }
-        internal void AddCustomRoute(string domain, string path, Action<Client, HttpClientData> handleCallback)
+        internal void AddCustomRoute(string domain, string path, Func<Client, HttpClientData, Task> handleCallback)
         {            
             AddRoute(domain, path, new Route()
             {
@@ -1122,45 +1153,45 @@ namespace Comgenie.Server.Handlers
 
         internal class Route
         {
-            public string ContentType { get; set; }
-            public byte[] Contents { get; set; }
-            public string LocalPath { get; set; }
-            public object Application { get; set; }
-            public string Proxy { get; set; }
+            public string? ContentType { get; set; }
+            public byte[]? Contents { get; set; }
+            public string? LocalPath { get; set; }
+            public object? Application { get; set; }
+            public string? Proxy { get; set; }
             public bool ShouldSendForwardHeaders { get; set; }
-            public Func<string, string, bool> ProxyShouldInterceptHandler { get; set; } // bool ShouldIntercept(requestPath, responseHeaders)
-            public Func<string, string, string, string> ProxyInterceptHandler { get; set; } // string NewContent(requestPath, responseHeaders, responseContent)
-            public MethodInfo ApplicationMethod { get; set; }
-            public ParameterInfo[] ApplicationMethodParameters { get; set; }
-            public Action<Client, HttpClientData> CustomHandler { get; set; }            
-            public Action<HttpClientData> WebsocketConnectHandler { get; set; }
-            public Action<HttpClientData, byte, byte[], ulong, ulong> WebsocketReceiveHandler { get; set; }
-            public Action<HttpClientData> WebsocketDisconnectHandler { get; set; }
+            public Func<string, string, bool>? ProxyShouldInterceptHandler { get; set; } // bool ShouldIntercept(requestPath, responseHeaders)
+            public Func<string, string, string, string>? ProxyInterceptHandler { get; set; } // string NewContent(requestPath, responseHeaders, responseContent)
+            public MethodInfo? ApplicationMethod { get; set; }
+            public ParameterInfo[]? ApplicationMethodParameters { get; set; }
+            public Func<Client, HttpClientData, Task>? CustomHandler { get; set; }            
+            public Func<HttpClientData, Task>? WebsocketConnectHandler { get; set; }
+            public Func<HttpClientData, byte, byte[], ulong, ulong, Task>? WebsocketReceiveHandler { get; set; }
+            public Func<HttpClientData, Task>? WebsocketDisconnectHandler { get; set; }
         }
 
         public class HttpClientData
         {
-            public Client Client { get; set; }
-            public string Method { get; set; }
-            public string RequestRaw { get; set; } // Full undecoded request ( starts with / ) 
-            public string Request { get; set; } // Full decoded request ( starts with / )
-            public string RequestPage { get; set; } // Request without the query string parameters
-            public string RequestPageShort { get; set; } // RequestPage without the route prefix
-            public string Host { get; set; }
+            public required Client Client { get; set; }
+            public required byte[] IncomingBuffer { get; set; }
+            public int IncomingBufferLength { get; set; }
+            public string? Method { get; set; }
+            public string? RequestRaw { get; set; } // Full undecoded request ( starts with / ) 
+            public string? Request { get; set; } // Full decoded request ( starts with / )
+            public string? RequestPage { get; set; } // Request without the query string parameters
+            public string? RequestPageShort { get; set; } // RequestPage without the route prefix
+            public string Host { get; set; } = "";
             public Dictionary<string, string> Headers { get; set; } = new Dictionary<string, string>();
             public List<KeyValuePair<string, string>> FullRawHeaders { get; set; } = new List<KeyValuePair<string, string>>(); // Includes duplicates of header keys
             public long ContentLength { get; set; }
-            public byte[] IncomingBuffer { get; set; }
-            public int IncomingBufferLength { get; set; }
-            public string ContentType { get; set; }
-            internal byte[] Data { get; set; }
-            public Stream DataStream { get; set; }
-            public string DataTempFileName { get; set; }
+            public string? ContentType { get; set; }
+            internal byte[]? Data { get; set; }
+            public Stream? DataStream { get; set; }
+            public string? DataTempFileName { get; set; }
             public long DataLength { get; set; }
-            public List<HttpClientFileData> FileData { get; set; }
-            public Action<HttpClientData, byte, byte[], ulong, ulong> WebsocketFrameHandler { get; set; }
-            public Action<HttpClientData> WebsocketDisconnectedHandler { get; set; }
-            public string CookieValue(string cookieName)
+            public List<HttpClientFileData>? FileData { get; set; }
+            public Func<HttpClientData, byte, byte[], ulong, ulong, Task>? WebsocketFrameHandler { get; set; }
+            public Func<HttpClientData, Task>? WebsocketDisconnectedHandler { get; set; }
+            public string? CookieValue(string cookieName)
             {
                 foreach (var header in FullRawHeaders)
                 {
@@ -1178,7 +1209,7 @@ namespace Comgenie.Server.Handlers
                 return null;
             }
 
-            public void SendWebsocketMessage(byte opcode, byte[] data, ulong offset, ulong len)
+            public async Task SendWebsocketMessage(byte opcode, byte[] data, ulong offset, ulong len)
             {
                 if (WebsocketFrameHandler == null)
                     return;
@@ -1214,27 +1245,35 @@ namespace Comgenie.Server.Handlers
                 header[0] = opcode;
                 header[0] |= 0b10000000; // set fin flag
 
-                Client.SendData(header, 0, header.Length, false);
-                Client.SendData(data, (int)offset, (int)len, true);
+                await Client.SendData(header, 0, header.Length, false);
+                await Client.SendData(data, (int)offset, (int)len, true);
             }
-            public void SendWebsocketMessage(byte opcode, byte[] data)
+            public async Task SendWebsocketMessage(byte opcode, byte[] data)
             {
-                SendWebsocketMessage(opcode, data, 0, (ulong)data.Length);
+                await SendWebsocketMessage(opcode, data, 0, (ulong)data.Length);
             }
-            public void SendWebsocketText(string text)
+            public async Task SendWebsocketText(string text)
             {
-                SendWebsocketMessage(0x01, ASCIIEncoding.UTF8.GetBytes(text));
+                await SendWebsocketMessage(0x01, ASCIIEncoding.UTF8.GetBytes(text));
             }
-            public void SendWebsocketJsonObject(object obj)
+            public async Task SendWebsocketJsonObject(object obj)
             {
-                SendWebsocketMessage(0x01, ASCIIEncoding.UTF8.GetBytes(JsonSerializer.Serialize(obj)));
+                await SendWebsocketMessage(0x01, ASCIIEncoding.UTF8.GetBytes(JsonSerializer.Serialize(obj)));
             }
         }        
 
         public class HttpClientFileData
         {
+            public HttpClientFileData(string? fileName, long dataFrom, long dataLength, Dictionary<string, string> headers, Stream dataStream)
+            {
+                Headers = headers;
+                FileName = fileName;
+                DataFrom = dataFrom;
+                DataLength = dataLength;
+                DataStream = dataStream;
+            }
             public Dictionary<string, string> Headers { get; set; }
-            public string FileName { get; set; }
+            public string? FileName { get; set; }
             public long DataFrom { get; set; }
             public long DataLength { get; set; }
             internal Stream DataStream { get; set; }
@@ -1246,17 +1285,17 @@ namespace Comgenie.Server.Handlers
         }
         public class HttpResponse
         {
-            public int StatusCode { get; set; }
-            public string ContentType { get; set; }
+            public int StatusCode { get; set; } = 200;
+            public string? ContentType { get; set; }
             public Dictionary<string, string> Headers { get; set; } = new Dictionary<string, string>();
 
             // File, Data or Stream or object (json)
-            public string FileName { get; set; }
-            public byte[] Data { get; set; }
-            public Stream Stream { get; set; }
+            public string? FileName { get; set; }
+            public byte[]? Data { get; set; }
+            public Stream? Stream { get; set; }
             public long ContentLengthStream { get; set; } = -1;
             public long ContentOffsetStream { get; set; }
-            public object ResponseObject { get; set; }
+            public object? ResponseObject { get; set; }
             public bool ChunkedResponse { get; set; }
             public bool GZipResponse { get; set; }
             public HttpResponse()

@@ -9,7 +9,7 @@ namespace Comgenie.Server.Utils
 {
     public class SubStream : Stream
     {
-        public Stream InnerStream = null;
+        public Stream InnerStream;
         public long CurLength = 0;
         public long CurOffset = 0;
         public long CurPosition = 0;

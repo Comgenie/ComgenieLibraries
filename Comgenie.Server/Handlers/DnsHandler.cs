@@ -8,17 +8,17 @@ namespace Comgenie.Server.Handlers
 {
     public class DnsHandler : IConnectionHandler
     {
-        public void ClientConnect(Client client)
+        public Task ClientConnect(Client client)
         {
             throw new NotImplementedException();
         }
 
-        public void ClientDisconnect(Client client)
+        public Task ClientDisconnect(Client client)
         {
             throw new NotImplementedException();
         }
 
-        public void ClientReceiveData(Client client, byte[] buffer, int len)
+        public Task ClientReceiveData(Client client, byte[] buffer, int len)
         {
             throw new NotImplementedException();
         }

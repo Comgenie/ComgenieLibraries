@@ -26,7 +26,7 @@ namespace Comgenie.Server.Handlers
         {
         }       
 
-        public void ClientConnect(Client client)
+        public async Task ClientConnect(Client client)
         {
             Log.Debug(nameof(SmtpHandler), "SMTP client connected");
             client.Data = new SmtpClientData()
@@ -38,23 +38,23 @@ namespace Comgenie.Server.Handlers
 
             try
             {
-                client.SendString("220 " + client.Server.DefaultDomain + " SMTP\r\n");
+                await client.SendString("220 " + client.Server.DefaultDomain + " SMTP\r\n");
             }
             catch { } // Just in case the client already disconnected again, TODO: Make sure this is done on a Worker thread and not the accept-connection thread
         }
 
-        public void ClientDisconnect(Client client)
+        public async Task ClientDisconnect(Client client)
         {
             Log.Debug(nameof(SmtpHandler), "SMTP client disconnected");
-            var data = (SmtpClientData)client.Data;
+            var data = (SmtpClientData?)client.Data;
             if (data != null && data.FileDataStream != null)
             {
-                ProcessIncomingEmail(client);                
+                await ProcessIncomingEmail(client);                
             }
         }
-        private Func<SmtpClientData, string, bool> MailboxCheckCallBack = null;
-        private Func<SmtpClientData, string, string, bool> AuthenticationCallBack = null;
-        private Action<SmtpClientData> IncomingEmailCallBack = null;
+        private Func<SmtpClientData, string, bool>? MailboxCheckCallBack = null;
+        private Func<SmtpClientData, string, string, bool>? AuthenticationCallBack = null;
+        private Action<SmtpClientData>? IncomingEmailCallBack = null;
 
         /// <summary>
         /// Whenever an email is successfully received from the client, this callback will be triggered.
@@ -96,7 +96,7 @@ namespace Comgenie.Server.Handlers
                 EmailForwards.Remove(emailFilter.ToLower());
         }
 
-        public void ProcessIncomingEmail(Client client)
+        public async Task ProcessIncomingEmail(Client client)
         {
             var forwardFailedDirectory = "forward-failed";
             var data = (SmtpClientData)client.Data;
@@ -115,15 +115,23 @@ namespace Comgenie.Server.Handlers
                 if (toAddress != null) {
                     try
                     {
-                        using (var stream = File.OpenRead(data.FileName))
-                            SmtpUtil.SendEmailRaw(SmtpUtil.GetAddressDomain(toAddress), mailbox, new string[] { toAddress }, stream, true);
+                        var receiverDomain = SmtpUtil.GetAddressDomain(toAddress);
+                        if (receiverDomain != null)
+                        {
+                            using (var stream = File.OpenRead(data.FileName))
+                                await SmtpUtil.SendEmailRaw(receiverDomain, mailbox, new string[] { toAddress }, stream, true);
+                        }
+                        else
+                        {
+                            Log.Warning(nameof(SmtpHandler), "Could not get domain part from " + toAddress);
+                        }
                     }
                     catch (Exception e)
                     {
                         if (!Directory.Exists(forwardFailedDirectory))
                             Directory.CreateDirectory(forwardFailedDirectory);
                         File.Copy(data.FileName, Path.Combine(forwardFailedDirectory, Path.GetFileName(data.FileName)));
-                        File.WriteAllText(Path.Combine(forwardFailedDirectory, Path.GetFileName(data.FileName)) + ".txt", DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss") + " (UTC):\r\nTO: "+ toAddress+"\r\n" + e.GetType().Name + " - " + e.Message + "\r\n" + e.StackTrace);
+                        await File.WriteAllTextAsync(Path.Combine(forwardFailedDirectory, Path.GetFileName(data.FileName)) + ".txt", DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss") + " (UTC):\r\nTO: "+ toAddress+"\r\n" + e.GetType().Name + " - " + e.Message + "\r\n" + e.StackTrace);
                     }
                 }
             }
@@ -136,7 +144,7 @@ namespace Comgenie.Server.Handlers
                     // See if mail contains a valid dkim record
                     using (var readStream = File.OpenRead(data.FileName))
                     {
-                        var dkimDomain = SmtpUtil.CheckDKIM(readStream);
+                        var dkimDomain = await SmtpUtil.CheckDKIM(readStream);
                         if (dkimDomain != null)
                         {
                             data.DKIM_Domain = dkimDomain;
@@ -174,9 +182,12 @@ namespace Comgenie.Server.Handlers
                 IncomingEmailCallBack(data);
         }
 
-        public void ClientReceiveData(Client client, byte[] buffer, int len)
+        public async Task ClientReceiveData(Client client, byte[] buffer, int len)
         {
-            var data = (SmtpClientData)client.Data;
+            var data = (SmtpClientData?)client.Data;
+            if (data == null)
+                return;
+
             if (data.IncomingBufferLength + len > data.IncomingBuffer.Length)
             {
                 Log.Warning(nameof(SmtpHandler), "SMTP buffer too small");
@@ -196,7 +207,7 @@ namespace Comgenie.Server.Handlers
                     {
                         // Normal commands
                         string line = ASCIIEncoding.ASCII.GetString(data.IncomingBuffer, 0, i);
-                        ClientHandleCommand(client, line);
+                        await ClientHandleCommand(client, line);
                         Buffer.BlockCopy(data.IncomingBuffer, i + 2, data.IncomingBuffer, 0, data.IncomingBufferLength - (i + 2)); // Move the rest to the front of the buffer
                         data.IncomingBufferLength -= (i + 2);
                         handledCommand = true;
@@ -205,9 +216,9 @@ namespace Comgenie.Server.Handlers
                     } else if (data.InDataPart && i + 4 < data.IncomingBufferLength && data.IncomingBuffer[i] == '\r' && data.IncomingBuffer[i + 1] == '\n' && data.IncomingBuffer[i + 2] == '.' && data.IncomingBuffer[i + 3] == '\r' && data.IncomingBuffer[i + 4] == '\n') {
                         // End of data
                         data.FileDataStream.Write(data.IncomingBuffer, 0, i + 2); // the \r\n is part of the email data
-                        ProcessIncomingEmail(client);
+                        await ProcessIncomingEmail(client);
 
-                        client.SendString("250 Ok\r\n");                                                
+                        await client.SendString("250 Ok\r\n");                                                
 
                         Buffer.BlockCopy(data.IncomingBuffer, i + 5, data.IncomingBuffer, 0, data.IncomingBufferLength - (i + 5)); // Move the rest to the front of the buffer
                         data.IncomingBufferLength -= (i + 5);
@@ -241,12 +252,15 @@ namespace Comgenie.Server.Handlers
             //client.SendData(buffer, 0, len); // Echo
         }
 
-        public void ClientHandleCommand(Client client, string line)
+        public async Task ClientHandleCommand(Client client, string line)
         {
             try
             {
                 Console.WriteLine(client.RemoteAddress + ": " + line);
-                var data = (SmtpClientData)client.Data;
+                var data = (SmtpClientData?)client.Data;
+                if (data == null)
+                    return;
+
                 data.SPF_IP = client.RemoteAddress;
 
                 var parts = line.Split(' ', 2);
@@ -259,7 +273,7 @@ namespace Comgenie.Server.Handlers
                         if (data.SmtpAuthUsername == null)
                         {
                             data.SmtpAuthUsername = ASCIIEncoding.ASCII.GetString(Convert.FromBase64String(line));
-                            client.SendString("334 UGFzc3dvcmQ6\r\n"); // Base 64 encoded 'Password'
+                            await client.SendString("334 UGFzc3dvcmQ6\r\n"); // Base 64 encoded 'Password'
                         }
                         else
                         {
@@ -268,11 +282,11 @@ namespace Comgenie.Server.Handlers
                             if (AuthenticationCallBack != null && AuthenticationCallBack(data, data.SmtpAuthUsername, data.SmtpAuthPassword))
                             {
                                 data.IsAuthenticated = true;
-                                client.SendString("235 2.7.0 Authentication successful\r\n");    
+                                await client.SendString("235 2.7.0 Authentication successful\r\n");    
                             }
                             else
                             {
-                                client.SendString("535 5.7.8 Authentication credentials invalid\r\n");
+                                await client.SendString("535 5.7.8 Authentication credentials invalid\r\n");
                             }
                             data.SmtpAuthMethod = null;
                             
@@ -286,12 +300,12 @@ namespace Comgenie.Server.Handlers
                         {
                             data.SmtpAuthUsername = parts[0];
                             data.SmtpAuthPassword = parts[1];
-                            client.SendString("235 2.7.0 Authentication successful\r\n");
+                            await client.SendString("235 2.7.0 Authentication successful\r\n");
                             data.IsAuthenticated = true;
                         }
                         else
                         {
-                            client.SendString("535 5.7.8 Authentication credentials invalid\r\n");
+                            await client.SendString("535 5.7.8 Authentication credentials invalid\r\n");
                         }
                         data.SmtpAuthMethod = null;
                     }
@@ -302,7 +316,7 @@ namespace Comgenie.Server.Handlers
                 if (parts[0] == "HELO" && parts.Length > 1)
                 {
                     data.HeloInfo = parts[1];
-                    client.SendString("250 Helo... Is it me you're looking for? " + parts[1] + "\r\n");
+                    await client.SendString("250 Helo... Is it me you're looking for? " + parts[1] + "\r\n");
                 }
                 else if (parts[0] == "EHLO" && parts.Length > 1) // Also send some more info
                 {
@@ -313,31 +327,31 @@ namespace Comgenie.Server.Handlers
                         extensionExtras += "250-AUTH LOGIN PLAIN\r\n";
                     if (EnableStartTLS)
                         extensionExtras += "250-STARTTLS\r\n";
-                    client.SendString("250-" + client.Server.DefaultDomain + " Ehlo... Is it me you're looking for? " + data.HeloInfo + "\r\n250-SIZE 157286400\r\n250-PIPELINING\r\n"+extensionExtras +"250 8BITMIME\r\n");
+                    await client.SendString("250-" + (client.Server?.DefaultDomain ?? "localhost") + " Ehlo... Is it me you're looking for? " + data.HeloInfo + "\r\n250-SIZE 157286400\r\n250-PIPELINING\r\n"+extensionExtras +"250 8BITMIME\r\n");
                 }
                 else if (parts[0] == "MAIL" && parts.Length > 0) // Mail from
                 {
                     var pos = line.IndexOf(":");
                     if (pos < 0)
                     {
-                        client.SendString("500 Error\r\n");
+                        await client.SendString("500 Error\r\n");
                         return;
                     }
                     data.MailFrom = line.Substring(pos + 1).Trim();
-                    client.SendString("250 OK\r\n");
+                    await client.SendString("250 OK\r\n");
                 }
                 else if (parts[0] == "RCPT" && parts.Length > 1) // Rcpt to
                 {
                     if (data.MailBox.Count > 10)
                     {
-                        client.SendString("452 Too many recipients\r\n");
+                        await client.SendString("452 Too many recipients\r\n");
                         return;
                     }
 
                     var pos = line.IndexOf(":");
                     if (pos < 0)
                     {
-                        client.SendString("500 Error\r\n");
+                        await client.SendString("500 Error\r\n");
                         return;
                     }
                     var rcptTo = line.Substring(pos + 1);
@@ -351,35 +365,40 @@ namespace Comgenie.Server.Handlers
                             approved = MailboxCheckCallBack(data, mailBox);
                         else if (data.IsAuthenticated)
                             approved = true; // Allow relay when authenticated
-                        else // By default accept all registered domains 
+                        else if (client.Server != null) // By default accept all registered domains 
                             approved = client.Server.Domains.Contains(mailBox.Substring(mailBox.LastIndexOf("@") + 1).ToLower());
                     }
 
-                    if (approved)
+                    if (approved && mailBox != null)
                     {
                         if (!data.RcptTo.Contains(rcptTo))
                             data.RcptTo.Add(rcptTo);
                         if (!data.MailBox.Contains(mailBox))
                             data.MailBox.Add(mailBox);
-                        client.SendString("250 OK\r\n");
+                        await client.SendString("250 OK\r\n");
                     }
                     else
                     {
-                        client.SendString("550 relay not permitted\r\n");
+                        await client.SendString("550 relay not permitted\r\n");
+
+                        // TEMP Code
+                        Log.Warning(nameof(SmtpHandler), "Added " + client.RemoteAddress + " to ban list");
+                        Server.IPBanList.Add(client.RemoteAddress);
+                        Server.SaveBanList();
                     }
                 }
                 else if (parts[0] == "DATA") // Also send some more info
                 {
                     if (data.MailBox.Count == 0)
                     {
-                        client.SendString("550 No recipients defined\r\n");
+                        await client.SendString("550 No recipients defined\r\n");
                         return;
                     }
 
                     data.InDataPart = true;
                     data.FileName = "mail-" + Guid.NewGuid().ToString() + ".eml";
                     data.FileDataStream = File.OpenWrite(data.FileName);
-                    client.SendString("354 End data with <CR><LF>.<CR><LF>\r\n");
+                    await client.SendString("354 End data with <CR><LF>.<CR><LF>\r\n");
                 }
                 else if (parts[0] == "AUTH" && parts.Length > 1) 
                 {
@@ -395,13 +414,13 @@ namespace Comgenie.Server.Handlers
                         Server.IPBanList.Add(client.RemoteAddress);
                         Server.SaveBanList();
 
-                        client.SendString("535 Not supported\r\n");
-                        client.Handler.ClientDisconnect(client);
-                        client.Disconnect();
+                        await client.SendString("535 Not supported\r\n");
+                        await client.Handler.ClientDisconnect(client);
+                        await client.Disconnect();
                     }
                     else if (parts[1].ToUpper() == "PLAIN")
                     {
-                        client.SendString("334 \r\n"); // Go ahead with the plain (but base64 encoded) credentials
+                        await client.SendString("334 \r\n"); // Go ahead with the plain (but base64 encoded) credentials
                         data.SmtpAuthMethod = "PLAIN";
                     }
                     else if (parts[1].ToUpper().StartsWith("PLAIN ")) // One line auth command
@@ -412,25 +431,25 @@ namespace Comgenie.Server.Handlers
                         {
                             data.SmtpAuthUsername = parts[0];
                             data.SmtpAuthPassword = parts[1];
-                            client.SendString("235 2.7.0 Authentication successful\r\n");
+                            await client.SendString("235 2.7.0 Authentication successful\r\n");
                             data.IsAuthenticated = true;
                         }
                         else
                         {
-                            client.SendString("535 5.7.8 Authentication credentials invalid\r\n");
+                            await client.SendString("535 5.7.8 Authentication credentials invalid\r\n");
                         }                        
 
                     }
                     else if (parts[1].ToUpper() == "LOGIN")
                     {
-                        client.SendString("334 VXNlcm5hbWU6\r\n"); // Base 64 encoded 'Username'
+                        await client.SendString("334 VXNlcm5hbWU6\r\n"); // Base 64 encoded 'Username'
                         data.SmtpAuthMethod = "LOGIN";
                     }
                     else if (parts[1].ToUpper().StartsWith("LOGIN "))
                     {
                         data.SmtpAuthUsername = ASCIIEncoding.ASCII.GetString(Convert.FromBase64String(parts[1].Substring(6)));
                         data.SmtpAuthMethod = "LOGIN";
-                        client.SendString("334 UGFzc3dvcmQ6\r\n"); // Base 64 encoded 'Password'                        
+                        await client.SendString("334 UGFzc3dvcmQ6\r\n"); // Base 64 encoded 'Password'                        
                     }
                     /*else if (parts[1] == "CRAM-MD5") // Go ahead with the md5 (and base64 encoded) credentials with challenge
                     {
@@ -440,22 +459,22 @@ namespace Comgenie.Server.Handlers
                 }
                 else if (parts[0] == "QUIT")
                 {
-                    client.SendString("221 Bye\r\n");
-                    client.Handler.ClientDisconnect(client);
-                    client.Disconnect();
+                    await client.SendString("221 Bye\r\n");
+                    await client.Handler.ClientDisconnect(client);
+                    await client.Disconnect();
 
                 }
-                else if (parts[0] == "STARTTLS" && EnableStartTLS)
+                else if (parts[0] == "STARTTLS" && EnableStartTLS && client.Server != null)
                 {
                     client.Server.EnableSSLOnClient(client, null, () =>
                     {
                         // Send this message in this callback to make sure no SSL packets is accidentally read before initializing sslstream
-                        client.SendString("220 go ahead\r\n");
+                        client.SendString("220 go ahead\r\n").Wait();
                     });
                 }
                 else if (parts[0] == "NOOP")
                 {
-                    client.SendString("250 Ok\r\n");
+                    await client.SendString("250 Ok\r\n");
                 }
                 else if (parts[0] == "RSET") // Reset current mail from/rcpt to/mailbox info
                 {
@@ -467,11 +486,11 @@ namespace Comgenie.Server.Handlers
                     data.SPF_Pass = false; // Don't reset IP address
                     data.DMARC_Action = null;
 
-                    client.SendString("250 Ok\r\n");
+                    await client.SendString("250 Ok\r\n");
                 }
                 else
                 {
-                    client.SendString("502 Command not implemented\r\n");
+                    await client.SendString("502 Command not implemented\r\n");
                 }
             }
             catch (Exception e)
@@ -483,30 +502,30 @@ namespace Comgenie.Server.Handlers
 
     public class SmtpClientData
     {
-        public string HeloInfo { get; set; }
-        public string MailFrom { get; set; }
-        public List<string> RcptTo { get; set; }
-        public List<string> MailBox { get; set; }
-        public byte[] IncomingBuffer { get; set; }
+        public required List<string> RcptTo { get; set; }
+        public required List<string> MailBox { get; set; }
+        public required byte[] IncomingBuffer { get; set; }
+        public string? HeloInfo { get; set; }
+        public string? MailFrom { get; set; }
         public int IncomingBufferLength { get; set; }
         public bool InDataPart { get; set; }
-        public Stream FileDataStream { get; set; }
-        public string FileName { get; set; }
+        public Stream? FileDataStream { get; set; }
+        public string? FileName { get; set; }
 
-        public string SmtpAuthMethod { get; set; }
-        public string SmtpAuthUsername { get; set; }
-        public string SmtpAuthPassword { get; set; }
+        public string? SmtpAuthMethod { get; set; }
+        public string? SmtpAuthUsername { get; set; }
+        public string? SmtpAuthPassword { get; set; }
         public bool IsAuthenticated { get; set; }
 
         // Check result
-        public string DKIM_Domain { get; set; }
+        public string? DKIM_Domain { get; set; }
         public bool DKIM_Pass { get; set; }
-        public string DKIM_FailReason { get; set; }
+        public string? DKIM_FailReason { get; set; }
 
-        public string SPF_IP { get; set; }
+        public string? SPF_IP { get; set; }
         public bool? SPF_Pass { get; set; }
 
-        public string DMARC_Action { get; set; }
+        public string? DMARC_Action { get; set; }
 
     }
 }

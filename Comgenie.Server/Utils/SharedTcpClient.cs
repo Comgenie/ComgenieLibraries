@@ -16,7 +16,7 @@ namespace Comgenie.Server.Utils
         private static List<OpenConnection> ExistingConnections = new List<OpenConnection>();
         private static object ExistingConnectionsLockObj = new object();
 
-        public OpenConnection Connection = null;
+        public OpenConnection Connection;
         private static int InstanceCount = 0;
         public int CurrentInstanceNumber = 0;
 
@@ -25,7 +25,7 @@ namespace Comgenie.Server.Utils
             CurrentInstanceNumber = ++InstanceCount;
             // Check if there is any open connection to reuse            
 
-            List<OpenConnection> expiredConnections = null;
+            List<OpenConnection>? expiredConnections = null;
             Log.Debug(nameof(SharedTcpClient), CurrentInstanceNumber + " Before lock");
 
             lock (ExistingConnectionsLockObj)
@@ -146,11 +146,11 @@ namespace Comgenie.Server.Utils
 
         public class OpenConnection
         {
-            public string Host { get; set; }
-            public int Port { get; set; }
-            public bool Ssl { get; set; }
-            public Socket Socket { get; set; }
-            public Stream Stream { get; set; }
+            public required string Host { get; set; }
+            public required int Port { get; set; }
+            public required bool Ssl { get; set; }
+            public required Socket Socket { get; set; }
+            public required Stream Stream { get; set; }
             public int CloseAfterSeconds { get; set; }
             public DateTime LastActivity { get; set; }
             public bool InUse { get; set; }
@@ -161,18 +161,18 @@ namespace Comgenie.Server.Utils
         /// Helper methods
 
         // Execute http request and returns a stream with the full response
-        public static SingleHttpResponseStream ExecuteHttpRequest(string url, string requestHeaders, Stream requestContent)
+        public static async Task<SingleHttpResponseStream> ExecuteHttpRequest(string url, string requestHeaders, Stream? requestContent)
         {
             var uri = new Uri(url);
             Log.Debug(nameof(SharedTcpClient), "Get shared client for " + uri.Host);
             var client = new SharedTcpClient(uri.Host, uri.Port, uri.Port == 443);
             client.Connection.CanReuse = false;
             Log.Debug(nameof(SharedTcpClient), "Send headers");
-            client.Connection.Stream.Write(Encoding.ASCII.GetBytes(requestHeaders));
+            await client.Connection.Stream.WriteAsync(Encoding.ASCII.GetBytes(requestHeaders));
             if (requestContent != null)
-                requestContent.CopyTo(client.Connection.Stream);
+                await requestContent.CopyToAsync(client.Connection.Stream);
             Log.Debug(nameof(SharedTcpClient), "Before flush");
-            client.Connection.Stream.Flush();
+            await client.Connection.Stream.FlushAsync();
             Log.Debug(nameof(SharedTcpClient), "After flush");
             return new SingleHttpResponseStream(client);
         }
@@ -262,7 +262,7 @@ namespace Comgenie.Server.Utils
             public override long Length => CurrentContentLength;
 
             public override long Position { get; set; }
-            private byte[] ReadFirstBuffer = null;
+            private byte[]? ReadFirstBuffer = null;
             private int ReadFirstBufferIndex = 0;
             public override int Read(byte[] buffer, int offset, int count)
             {

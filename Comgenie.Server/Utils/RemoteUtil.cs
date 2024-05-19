@@ -20,14 +20,14 @@ namespace Comgenie.Server.Utils
     {
         public const int MaxPacketSize = 1024 * 100; // Must be higher than the buffer used in Client.cs
 
-        private Thread RemoteCommunicationsThread = null;
+        private Thread RemoteCommunicationsThread;
         private bool IsRunning = true;
-        public RemoteUtil(string host, int port, string key, HttpHandler httpHandler= null, SmtpHandler smtpHandler = null, bool ssl=true)
+        public RemoteUtil(string host, int port, string key, HttpHandler? httpHandler= null, SmtpHandler? smtpHandler = null, bool ssl=true)
         {
             // Open connection to remote host
             // Route all httpHandler routes via remote host (including new ones) to this instance
             // Route all (for a specific domain/email) incoming email from remote host back to this instance 
-            RemoteCommunicationsThread = new Thread(new ThreadStart(() =>
+            RemoteCommunicationsThread = new Thread(new ThreadStart(async () =>
             {
                 while (IsRunning) // In case the connection drops, we will reconnect
                 {
@@ -37,7 +37,7 @@ namespace Comgenie.Server.Utils
                         Log.Debug(nameof(RemoteUtil), "Connect");
                         
                         var socket = new Socket(SocketType.Stream, ProtocolType.Tcp);
-                        socket.Connect(host, port);                        
+                        await socket.ConnectAsync(host, port);                        
                         Stream streamToMainInstance = new NetworkStream(socket, true);
                         if (ssl)
                             streamToMainInstance = new SslStream(streamToMainInstance, false);
@@ -47,7 +47,7 @@ namespace Comgenie.Server.Utils
                             Log.Debug(nameof(RemoteUtil), "SSL Auth");
 
                             if (ssl)
-                                ((SslStream)streamToMainInstance).AuthenticateAsClient(host);
+                                ((SslStream)streamToMainInstance).AuthenticateAsClientAsync(host);
 
                             // Send key
                             Log.Debug(nameof(RemoteUtil), "Sending key");
@@ -111,7 +111,7 @@ namespace Comgenie.Server.Utils
                                     if (!IncomingClients.ContainsKey(clientId))
                                     {
                                         var handler = buffer[5 + sizeof(Int64)];
-                                        IConnectionHandler handlerObj = null;
+                                        IConnectionHandler? handlerObj = null;
 
                                         if (handler == 1)  // NOTE: Now only support for handlers with a direct response 
                                             handlerObj = httpHandler;
@@ -150,7 +150,7 @@ namespace Comgenie.Server.Utils
 
                                             });
                                             Log.Debug(nameof(RemoteUtil), "call 'ClientConnect' on handler");
-                                            newClient.Handler.ClientConnect(newClient);
+                                            await newClient.Handler.ClientConnect(newClient);
                                             IncomingClients.Add(clientId, newClient);
                                         }
                                     }
@@ -168,7 +168,7 @@ namespace Comgenie.Server.Utils
 
                                         Log.Debug(nameof(RemoteUtil), "call 'ClientReceiveData' with  " + actualData.Length + " data");
 
-                                        client.AddIncomingBufferData(actualData, actualData.Length, () =>
+                                        _ = client.AddIncomingBufferData(actualData, actualData.Length, () =>
                                         {
                                             if (actualData.Length == 0) // The other side can send an empty data packet to mark the end of his data, that means by this point, we processed all data and we can send our 'end of the data'
                                             {
@@ -179,10 +179,7 @@ namespace Comgenie.Server.Utils
                                             
                                                 SendPacket(streamToMainInstance, 3, BitConverter.GetBytes((Int64)clientId)); // Just send the client id and no data
                                             }
-
-                                        });                                        
-
-                                        
+                                        });
                                     }
                                 }
                                 else if (command == 4) // Closing client connection ( Int64 Client id ), note that this can happen halfway during execution of a request
@@ -193,7 +190,7 @@ namespace Comgenie.Server.Utils
                                         Log.Debug(nameof(RemoteUtil), "Disconnecting client " + clientId);
                                         var client = IncomingClients[clientId];
                                         client.StreamIsReady = false;
-                                        client.Handler.ClientDisconnect(client);
+                                        await client.Handler.ClientDisconnect(client);
                                         IncomingClients.Remove(clientId);
                                     }
                                 }

@@ -19,6 +19,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Comgenie.Storage", "Comgeni
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "StorageExample", "StorageExample\StorageExample.csproj", "{5B44FB1B-4928-499A-A457-CB46FDBF3595}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MailServerExample", "MailServerExample\MailServerExample.csproj", "{8C60CD10-60B6-4F41-B382-BBDFE4DD964B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -41,6 +43,10 @@ Global
 		{5B44FB1B-4928-499A-A457-CB46FDBF3595}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{5B44FB1B-4928-499A-A457-CB46FDBF3595}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{5B44FB1B-4928-499A-A457-CB46FDBF3595}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8C60CD10-60B6-4F41-B382-BBDFE4DD964B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8C60CD10-60B6-4F41-B382-BBDFE4DD964B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8C60CD10-60B6-4F41-B382-BBDFE4DD964B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8C60CD10-60B6-4F41-B382-BBDFE4DD964B}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -48,6 +54,7 @@ Global
 	GlobalSection(NestedProjects) = preSolution
 		{D33555F0-2F66-4FF7-8989-B67869821908} = {6ACA7B76-7A63-4545-8CFB-0D03C58B302E}
 		{5B44FB1B-4928-499A-A457-CB46FDBF3595} = {6ACA7B76-7A63-4545-8CFB-0D03C58B302E}
+		{8C60CD10-60B6-4F41-B382-BBDFE4DD964B} = {6ACA7B76-7A63-4545-8CFB-0D03C58B302E}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {57261907-7323-4851-B237-9189418BEA81}

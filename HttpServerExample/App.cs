@@ -7,7 +7,7 @@ namespace HttpServerExample
     internal class App
     {
         // /app
-        public HttpHandler.HttpResponse Index(HttpHandler.HttpClientData httpClientData)
+        public async Task<HttpHandler.HttpResponse> Index(HttpHandler.HttpClientData httpClientData)
         {
             return new HttpHandler.HttpResponse()
             {
@@ -28,10 +28,12 @@ namespace HttpServerExample
         }
 
         // /app/TimesTwo
-        public HttpHandler.HttpResponse TimesTwo(HttpHandler.HttpClientData httpClientData, ExampleDTO dto)
+        public async Task<HttpHandler.HttpResponse> TimesTwo(HttpHandler.HttpClientData httpClientData, ExampleDTO dto)
         {
             if (dto == null)
                 return new HttpHandler.HttpResponse(400, "Missing object");
+
+            await Task.Delay(1000); // Example delay to demonstrate async abilities
 
             dto.Number *= 2;
             return new HttpHandler.HttpResponse(200, dto);

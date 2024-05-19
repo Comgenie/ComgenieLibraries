@@ -9,6 +9,7 @@ using System.Net.Mail;
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -18,8 +19,8 @@ namespace Comgenie.Server.Utils
 {
     public class SmtpUtil
     {
-        private static Dictionary<string, RSACryptoServiceProvider> DkimRsa = new Dictionary<string, RSACryptoServiceProvider>();
-        public static RSACryptoServiceProvider GetDkimRsa(string domain, bool createIfNotExists=false, bool checkIfCorrectlyAddedToDomain=true)
+        private static Dictionary<string, RSACryptoServiceProvider?> DkimRsa = new Dictionary<string, RSACryptoServiceProvider?>();
+        public static RSACryptoServiceProvider? GetDkimRsa(string domain, bool createIfNotExists=false, bool checkIfCorrectlyAddedToDomain=true)
         {
             if (!DkimRsa.ContainsKey(domain))
             {
@@ -48,12 +49,12 @@ namespace Comgenie.Server.Utils
                 if (checkIfCorrectlyAddedToDomain)
                 {
                     var pubKey = SmtpUtil.ExportPublicKey(rsa);
-                    var currentTXTRecord = GetDNSResult("dkim._domainkey." + domain, "TXT");
-                    if (currentTXTRecord == null && currentTXTRecord.Length == 0)
+                    var currentTXTRecord = GetDNSResult("dkim._domainkey." + domain, "TXT").Result;
+                    if (currentTXTRecord == null || currentTXTRecord.Length == 0)
                     {
                         Console.WriteLine("Warning: DKIM TXT Record for " + domain + " missing.");
                     }
-                    if (!currentTXTRecord.Any(a => a.Contains(pubKey)))
+                    else if (!currentTXTRecord.Any(a => a.Contains(pubKey)))
                     {
                         Console.WriteLine("Warning: DKIM TXT Record for " + domain + " is not having the correct key.");
                     }
@@ -105,24 +106,11 @@ namespace Comgenie.Server.Utils
 
         public static void QueueSendMail(MailMessage message)
         {
-            // TODO: If there is already a thread running, use that one
-
-            var thread = new Thread(new ThreadStart(() =>
-            {
-                try
-                {
-                    SendMail(message);
-                }
-                catch (Exception e)
-                {
-                    Console.WriteLine("Could not send email:" + e.Message);
-                    // TODO: Add to Failed/Try again queue
-                }
-            }));
-            thread.Start();
+            // TODO: Better queue system
+            _ = SendMail(message);
         }
 
-        public static string GetDKIMSignature(string fromDomain, Stream emlData, string includeHeaders = "From,To,Cc,Subject,Content-Type,Content-Transfer-Encoding,Message-ID,Date")
+        public static string? GetDKIMSignature(string fromDomain, Stream emlData, string includeHeaders = "From,To,Cc,Subject,Content-Type,Content-Transfer-Encoding,Message-ID,Date")
         {
             if (emlData == null)
                 throw new ArgumentException();
@@ -198,8 +186,10 @@ namespace Comgenie.Server.Utils
                 + (addOwnMessageId ? ("Message-ID: " + messageId + "\r\n") : "");
         }
 
-        public static string SendMail(MailMessage message)
+        public static async Task<string> SendMail(MailMessage message, bool ignoreCertificateIssues = false)
         {
+            if (message.From == null)
+                throw new ArgumentException("Email message must have a from address set");
             var fromDomain = message.From.Host;
             string messageId = "<" + Guid.NewGuid().ToString() + "@" + fromDomain + ">";
             var emailDate = DateTime.UtcNow;
@@ -211,7 +201,6 @@ namespace Comgenie.Server.Utils
 
             string contentType = message.IsBodyHtml ? "text/html; charset=utf-8" : "text/plain; charset=utf-8";            
             var body = message.Body;
-
             
             if (message.AlternateViews.Count > 0)
             {                
@@ -258,7 +247,8 @@ namespace Comgenie.Server.Utils
 
                     newBody.Append("\r\n--" + boundary + "\r\n");
                     newBody.Append("Content-Type: " + attachment.ContentType + "\r\n");
-                    newBody.Append("Content-Disposition: "+ attachment.ContentDisposition.ToString() + "\r\n");
+                    if (attachment.ContentDisposition != null)
+                        newBody.Append("Content-Disposition: "+ attachment.ContentDisposition.ToString() + "\r\n");
                     newBody.Append("Content-Transfer-Encoding: base64\r\n");
 
                     if (!string.IsNullOrEmpty(attachment.ContentId))
@@ -276,14 +266,16 @@ namespace Comgenie.Server.Utils
                 contentType = "multipart/mixed; boundary=\"" + boundary + "\"";
             }
 
-            HashAlgorithm hash = HashAlgorithm.Create("SHA-256");
+            HashAlgorithm? hash = SHA256.Create();
+            if (hash == null)
+                throw new Exception("SHA-256 hasher could not be initialized");
             if (base64fullBody)
                 body = Convert.ToBase64String(UTF8Encoding.UTF8.GetBytes(body));
             var bodyWithEnters = SplitInto79CharLines(body);
             if (!bodyWithEnters.EndsWith("\r\n"))
                 bodyWithEnters += "\r\n"; // Our email body should always end with an enter
 
-            byte[] bodyBytes =  Encoding.ASCII.GetBytes(bodyWithEnters); // at this point the content should always be ASCII, any UTF-8 content is base64 encoded
+            byte[] bodyBytes = Encoding.ASCII.GetBytes(bodyWithEnters); // at this point the content should always be ASCII, any UTF-8 content is base64 encoded
             string hashout = Convert.ToBase64String(hash.ComputeHash(bodyBytes));
 
             // Generate signature
@@ -340,18 +332,18 @@ namespace Comgenie.Server.Utils
             receiverAddresses.UnionWith(message.Bcc.Select(a => a.Address));
 
             var ms = new MemoryStream(ASCIIEncoding.ASCII.GetBytes(emailData.ToString()));
-            SendEmailRaw(message.From.Address, receiverAddresses.ToArray(), ms);
+            await SendEmailRaw(message.From.Address, receiverAddresses.ToArray(), ms, ignoreCertificateIssues: ignoreCertificateIssues);
             return emailData.ToString();
         }
 
-        public static string GetAddressDomain(string address)
+        public static string? GetAddressDomain(string? address)
         {
             address = GetMailAddress(address);
             if (address == null)
                 return null;            
             return address.Substring(address.IndexOf("@") + 1).ToLower();
         }
-        public static string GetMailAddress(string mailAddressWithNameAndExtras)
+        public static string? GetMailAddress(string? mailAddressWithNameAndExtras)
         {
             if (string.IsNullOrEmpty(mailAddressWithNameAndExtras))
                 return null;
@@ -367,23 +359,34 @@ namespace Comgenie.Server.Utils
 
             return mailAddressWithNameAndExtras;
         }
-        public static void SendEmailRaw(string mailFrom, string[] rcptTo, Stream emailData, bool addExtraDotToBeginningOfLinesWithDots = false, string addHeadersBeforeEmailData = null)
+
+        private static bool AcceptAllCertificates(object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors sslPolicyErrors)
+        {
+            // There is this fun technique called 'DANE' to offer certificates using a different subject name by using special TLSA dns records
+            // Since we do not support it yet, we will have an ugly option to just disable the certificate check to make sending mails work
+            // Thanks for the added security..
+            return true;
+        }
+
+        public static async Task SendEmailRaw(string mailFrom, string[] rcptTo, Stream emailData, bool addExtraDotToBeginningOfLinesWithDots = false, string? addHeadersBeforeEmailData = null, bool ignoreCertificateIssues = false)
         {
             var groups = rcptTo.GroupBy(a => GetAddressDomain(a));
             foreach (var group in groups)
             {
+                if (group.Key == null)
+                    continue;
                 emailData.Position = 0;
-                SendEmailRaw(group.Key, mailFrom, group.ToArray(), emailData, addExtraDotToBeginningOfLinesWithDots, addHeadersBeforeEmailData);
+                await SendEmailRaw(group.Key, mailFrom, group.ToArray(), emailData, addExtraDotToBeginningOfLinesWithDots, addHeadersBeforeEmailData, ignoreCertificateIssues: ignoreCertificateIssues);
             }
         }
 
-        public static void SendEmailRaw(string receiverDomain, string mailFrom, string[] rcptTo, Stream emailData, bool addExtraDotToBeginningOfLinesWithDots=false, string addHeadersBeforeEmailData=null, string customEhlo=null)
+        public static async Task SendEmailRaw(string receiverDomain, string mailFrom, string[] rcptTo, Stream emailData, bool addExtraDotToBeginningOfLinesWithDots=false, string? addHeadersBeforeEmailData=null, string? customEhlo=null, bool ignoreCertificateIssues=false)
         {
             var fromDomain = GetAddressDomain(mailFrom);
             if (rcptTo.Length == 0)
                 return;
             
-            var mxServer = GetDNSResult(receiverDomain, "MX");
+            var mxServer = await GetDNSResult(receiverDomain, "MX");
             if (mxServer == null || mxServer.Length == 0)
             {
                 // TODO: Send later
@@ -392,46 +395,46 @@ namespace Comgenie.Server.Utils
 
             using (TcpClient tcp = new TcpClient(AddressFamily.InterNetwork))
             {
-                tcp.Connect(mxServer[0], 25);
+                await tcp.ConnectAsync(mxServer[0], 25);
 
                 using (var stream = tcp.GetStream())
-                using (var sslStream = new SslStream(stream))
+                using (var sslStream = new SslStream(stream, false, ignoreCertificateIssues ? new RemoteCertificateValidationCallback(AcceptAllCertificates) : null))
                 {
                     var writer = new StreamWriter(stream, ASCIIEncoding.ASCII) { AutoFlush = true, NewLine = "\r\n" };
                     var reader = new StreamReader(stream, ASCIIEncoding.ASCII);
 
-                    var banner = ReadAll(reader, "220");
+                    var banner = await ReadAll(reader, "220");
                     Console.WriteLine("SMTP Banner: " + banner);
 
-                    writer.WriteLine("EHLO " + (string.IsNullOrEmpty(customEhlo) ? fromDomain : customEhlo));
-                    var ehlo = ReadAll(reader, "250");
+                    await writer.WriteLineAsync("EHLO " + (string.IsNullOrEmpty(customEhlo) ? fromDomain : customEhlo));
+                    var ehlo = await ReadAll(reader, "250");
                     if (ehlo.Contains("STARTTLS"))
                     {
                         // Enable SSL
-                        writer.WriteLine("STARTTLS");
-                        ReadAll(reader, "220");
+                        await writer.WriteLineAsync("STARTTLS");
+                        await ReadAll(reader, "220");
 
-                        sslStream.AuthenticateAsClient(mxServer[0]);
+                        await sslStream.AuthenticateAsClientAsync(mxServer[0]);
 
                         writer = new StreamWriter(sslStream, ASCIIEncoding.ASCII) { AutoFlush = true }; // , NewLine = "\r\n"
                         reader = new StreamReader(sslStream, ASCIIEncoding.ASCII);
 
                         // Say ehlo again after TLS
-                        writer.WriteLine("EHLO " + (string.IsNullOrEmpty(customEhlo) ? fromDomain : customEhlo));
-                        ehlo = ReadAll(reader, "250");
+                        await writer.WriteLineAsync("EHLO " + (string.IsNullOrEmpty(customEhlo) ? fromDomain : customEhlo));
+                        ehlo = await ReadAll(reader, "250");
                     }
 
-                    writer.WriteLine("MAIL FROM: " + (mailFrom.Contains("<") ? mailFrom : "<" + mailFrom +">"));
-                    ReadAll(reader, "250");
+                    await writer.WriteLineAsync("MAIL FROM: " + (mailFrom.Contains("<") ? mailFrom : "<" + mailFrom +">"));
+                    await ReadAll(reader, "250");
 
                     foreach (var to in rcptTo)
                     {
-                        writer.WriteLine("RCPT TO: " + (to.Contains("<") ? to : "<" + to + ">"));
-                        ReadAll(reader, "250");
+                        await writer.WriteLineAsync("RCPT TO: " + (to.Contains("<") ? to : "<" + to + ">"));
+                        await ReadAll(reader, "250");
                     }
 
-                    writer.WriteLine("DATA");
-                    ReadAll(reader, "354");
+                    await writer.WriteLineAsync("DATA");
+                    await ReadAll(reader, "354");
 
                     emailData.Position = 0;
                     using (var emailDataReader = new StreamReader(emailData, ASCIIEncoding.ASCII))
@@ -439,13 +442,13 @@ namespace Comgenie.Server.Utils
                         writer.AutoFlush = false;
 
                         if (addHeadersBeforeEmailData != null)
-                            writer.Write(addHeadersBeforeEmailData);
+                            await writer.WriteAsync(addHeadersBeforeEmailData);
 
                         // TODO: Make it streaming using ReadBlock. We should not use ReadLine as we need to preserve all enters exactly  (for dkim)
                         
                         // Retrieve and send as lines
-                        string readLine = null;
-                        while ((readLine = emailDataReader.ReadLine()) != null) // The SMTP protocol is very text based
+                        string? readLine = null;
+                        while ((readLine = await emailDataReader.ReadLineAsync()) != null) // The SMTP protocol is very text based
                         {
                             if (!tcp.Connected)
                                 throw new Exception("Connection lost while sending stream");
@@ -453,17 +456,17 @@ namespace Comgenie.Server.Utils
                             if (addExtraDotToBeginningOfLinesWithDots && readLine.StartsWith(".")) // The code executing this method indicates that there are no extra dots added yet
                                 readLine = "." + readLine;
 
-                            writer.WriteLine(readLine);                                                        
+                            await writer.WriteLineAsync(readLine);                                                        
                         }
                         
-                        writer.Flush();
+                        await writer.FlushAsync();
                         writer.AutoFlush = true;
                     }
 
-                    writer.WriteLine(".");
-                    ReadAll(reader, "250");
+                    await writer.WriteLineAsync(".");
+                    await ReadAll(reader, "250");
 
-                    writer.WriteLine("QUIT");
+                    await writer.WriteLineAsync("QUIT");
 
                     writer.Close();
                     reader.Close();
@@ -471,14 +474,16 @@ namespace Comgenie.Server.Utils
             }
         }
 
-        private static string ReadAll(StreamReader reader, string checkIfLineStartsWith=null)
+        private static async Task<string> ReadAll(StreamReader reader, string? checkIfLineStartsWith=null)
         {
             StringBuilder sb = new StringBuilder();
             while (true)
             {
-                var line = reader.ReadLine();
+                var line = await reader.ReadLineAsync();
                 sb.AppendLine(line);
                 Console.WriteLine("SMTP: " + line);
+                if (line == null)
+                    throw new Exception("SMTP connection closed");
                 if (checkIfLineStartsWith != null && !line.StartsWith(checkIfLineStartsWith))
                     throw new Exception("Unexpected SMTP response: " + line);
 
@@ -487,10 +492,10 @@ namespace Comgenie.Server.Utils
             }
         }
 
-        private static Dictionary<string, Tuple<DateTime, string[]>> DnsCache = new Dictionary<string, Tuple<DateTime, string[]>>();
+        private static Dictionary<string, Tuple<DateTime, string[]?>> DnsCache = new Dictionary<string, Tuple<DateTime, string[]?>>();
 
 
-        public static string[] GetDNSResult(string domain, string type)
+        public static async Task<string[]?> GetDNSResult(string domain, string type)
         {
             var cacheKey = domain + "|" + type;
             lock (DnsCache)
@@ -499,10 +504,10 @@ namespace Comgenie.Server.Utils
                     return DnsCache[cacheKey].Item2;
             }
 
-            string[] result = null;
+            string[]? result = null;
 
             var MXData = new Regex("data\": ?\"(.+?)\"", RegexOptions.Compiled);
-            MatchCollection matches = null;
+            MatchCollection? matches = null;
             for (var tries = 0; tries < 3; tries++)
             {
                 try
@@ -510,7 +515,7 @@ namespace Comgenie.Server.Utils
                     System.Net.ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls11 | SecurityProtocolType.Tls12;
                     using (var client = new HttpClient())
                     {
-                        var data = client.GetStringAsync("https://dns.google.com/resolve?name=" + domain + "&type="+type).Result;
+                        var data = await client.GetStringAsync("https://dns.google.com/resolve?name=" + domain + "&type="+type);
                         matches = MXData.Matches(data);
                     }
                     break;
@@ -519,7 +524,7 @@ namespace Comgenie.Server.Utils
                 {
                     if (tries == 2)
                         break;
-                    Thread.Sleep(3000);
+                    await Task.Delay(2000);
                 }
             }
 
@@ -544,9 +549,9 @@ namespace Comgenie.Server.Utils
             lock (DnsCache)
             {
                 if (DnsCache.ContainsKey(cacheKey))
-                    DnsCache[cacheKey] = new Tuple<DateTime, string[]>(DateTime.UtcNow.AddMinutes(30), result);
+                    DnsCache[cacheKey] = new Tuple<DateTime, string[]?>(DateTime.UtcNow.AddMinutes(30), result);
                 else
-                    DnsCache.Add(cacheKey, new Tuple<DateTime, string[]>(DateTime.UtcNow.AddMinutes(30), result));
+                    DnsCache.Add(cacheKey, new Tuple<DateTime, string[]?>(DateTime.UtcNow.AddMinutes(30), result));
             }
 
             return result;
@@ -556,7 +561,7 @@ namespace Comgenie.Server.Utils
         {
             return false;
         }
-        public static string CheckDKIM(Stream file) // returns signature domain
+        public static async Task<string?> CheckDKIM(Stream file) // returns signature domain
         {
             file.Position = 0;
             var dkim = SmtpUtil.GetHeaderValue(file, "DKIM-Signature");
@@ -609,8 +614,11 @@ namespace Comgenie.Server.Utils
                 throw new Exception("DKIM-Signature algoritm is unsupported" + dkimSignatureParts["a"]);
 
             file.Position = 0;
-            
-            var hash = HashAlgorithm.Create("SHA-256");
+
+            var hash = SHA256.Create();
+            if (hash == null)
+                throw new Exception("Could not initialize SHA-256 hasher");
+
             CanonicalizatedBodyStream.ForwardStreamPositionToBody(file);
 
             string hashout = Convert.ToBase64String(hash.ComputeHash(new CanonicalizatedBodyStream(file, canonicalizationBody == "simple")));            
@@ -667,7 +675,7 @@ namespace Comgenie.Server.Utils
             var dkimSelector = dkimSignatureParts["s"].ToLower();
             var dkimDomain = dkimSignatureParts["d"].ToLower();
             var dnsRequestDomain = dkimSelector + "._domainkey." + dkimDomain;
-            var dnsResult = SmtpUtil.GetDNSResult(dnsRequestDomain, "txt"); // [dkim s parameter from header]._domainkey.[dkim d parameter from header]
+            var dnsResult = await SmtpUtil.GetDNSResult(dnsRequestDomain, "txt"); // [dkim s parameter from header]._domainkey.[dkim d parameter from header]
 
             if (dnsResult == null || !dnsResult.Any(a=>a.Contains("p=")))
                 throw new Exception("DKIM record is missing from domain " + dnsRequestDomain);
@@ -710,7 +718,7 @@ namespace Comgenie.Server.Utils
 
             return dkimDomain;
         }
-        public static string GetHeaderValue(Stream file, string header)
+        public static string? GetHeaderValue(Stream file, string header)
         {
             return GetHeaderValues(file, header).FirstOrDefault();
         }
@@ -845,7 +853,7 @@ namespace Comgenie.Server.Utils
             }
 
 
-            private byte[] CurrentOutgoingData = null;
+            private byte[]? CurrentOutgoingData = null;
             private int CurrentIncomingDataPos = 0;
             private bool Finished = false;
             private bool WeHadAtLeastOneLineOfData = false;
@@ -947,6 +955,8 @@ namespace Comgenie.Server.Utils
             var sb = new StringBuilder();
 
             var parameters = csp.ExportParameters(false);
+            if (parameters.Modulus == null || parameters.Exponent == null)
+                throw new Exception("Could not export the public key parameters");
             using (var stream = new MemoryStream())
             {
                 var writer = new BinaryWriter(stream);

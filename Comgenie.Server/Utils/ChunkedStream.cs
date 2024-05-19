@@ -10,7 +10,7 @@ namespace Comgenie.Server.Utils
 {
     public class ChunkedStream : Stream
     {
-        public Stream InnerStream = null;
+        public Stream InnerStream;
         public byte[] CurrentBuffer = new byte[1024*32];
         public int BufferLength = 0;
         public int BufferPos = 0;
@@ -18,8 +18,8 @@ namespace Comgenie.Server.Utils
         private bool HadFirstResponse = false;
         private bool EnableGZipCompression = false;
 
-        private GZipStream GZipStream = null;
-        private MemoryStream CompressedData = null;
+        private GZipStream? GZipStream = null;
+        private MemoryStream? CompressedData = null;
         public ChunkedStream(Stream originalStream, bool enableGZipCompression=false)
         {
             InnerStream = originalStream;
@@ -41,9 +41,8 @@ namespace Comgenie.Server.Utils
             if (InnerStream != null)
                 InnerStream.Dispose();
 
-            GZipStream= null;
+            GZipStream = null;
             CompressedData = null;
-            InnerStream = null;
         }
 
         public override bool CanRead => InnerStream.CanRead;
@@ -63,7 +62,7 @@ namespace Comgenie.Server.Utils
         {
             InnerStream.Flush();
         }
-        public string FullResponse { get; set; }
+        //public string FullResponse { get; set; }
 
         public override int Read(byte[] buffer, int offset, int count)
         {
@@ -76,7 +75,7 @@ namespace Comgenie.Server.Utils
                 if (BufferLength == 0)
                     HadLastRead = true;
 
-                if (EnableGZipCompression && BufferLength > 0) // I wish the c# framework GZipStream was written so I could just put this stream around that stream.. but nope
+                if (EnableGZipCompression && BufferLength > 0 && GZipStream != null && CompressedData != null) // I wish the c# framework GZipStream was written so I could just put this stream around that stream.. but nope
                 {                    
                     GZipStream.Write(CurrentBuffer, 0, BufferLength);
                     GZipStream.Flush();
@@ -101,7 +100,7 @@ namespace Comgenie.Server.Utils
                 Buffer.BlockCopy(bytesPrefix, 0, CurrentBuffer, 0, bytesPrefix.Length);
                 BufferLength += bytesPrefix.Length;
 
-                FullResponse += ASCIIEncoding.ASCII.GetString(CurrentBuffer, 0, BufferLength);
+                //FullResponse += ASCIIEncoding.ASCII.GetString(CurrentBuffer, 0, BufferLength);
 
                 BufferPos = 0;
             }

@@ -18,7 +18,7 @@ namespace Comgenie.Server
             LogFile=2
         }
 
-        private static Dictionary<string, LogSourceOutputSetting> SourceSettings = null;
+        private static Dictionary<string, LogSourceOutputSetting>? SourceSettings = null;
         private static LogSourceOutputSetting GetSettingForSource(string source, int level)
         {
             if (SourceSettings == null)
@@ -30,7 +30,7 @@ namespace Comgenie.Server
             }
 
             var key = source + ":" + level;
-            if (SourceSettings.ContainsKey(key))
+            if (SourceSettings != null && SourceSettings.ContainsKey(key))
                 return SourceSettings[key];
 
             return level == 0 ? LogSourceOutputSetting.Ignore : LogSourceOutputSetting.Screen;
