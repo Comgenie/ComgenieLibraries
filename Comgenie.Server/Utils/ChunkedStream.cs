@@ -20,6 +20,7 @@ namespace Comgenie.Server.Utils
 
         private GZipStream? GZipStream = null;
         private MemoryStream? CompressedData = null;
+        public static CompressionLevel CompressionLevel { get; set; } = CompressionLevel.Fastest;
         public ChunkedStream(Stream originalStream, bool enableGZipCompression=false)
         {
             InnerStream = originalStream;
@@ -28,7 +29,7 @@ namespace Comgenie.Server.Utils
             if (enableGZipCompression)
             {
                 CompressedData = new MemoryStream();
-                GZipStream = new GZipStream(CompressedData, CompressionLevel.Fastest, true);
+                GZipStream = new GZipStream(CompressedData, ChunkedStream.CompressionLevel, true);
             }
         }
         public override void Close()
