@@ -1,5 +1,5 @@
 ﻿using Comgenie.Storage.Locations;
-using Comgenie.Storage.Utils;
+using Comgenie.Utils;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -15,14 +15,14 @@ namespace Comgenie.Storage.Entities
 {
     internal class StorageLocationInfo
     {
-        public IStorageLocation Location { get; set; }
+        public required IStorageLocation Location { get; set; }
         public int? SyncInterval { get; set; }
         public int Priority { get; set; }
         public bool EnableRepairData { get; set; }
-        public byte[] EncryptionKey { get; set; }
+        public required byte[] EncryptionKey { get; set; }
         public string[]? TagFilters { get; set; } = null;
         public bool Shared { get; set; } = false;
-        public StoragePoolIndex Index { get; set; }
+        public StoragePoolIndex? Index { get; set; }
         public SuperTree<StorageItem> Tree { get; set; } = new SuperTree<StorageItem>();
         public DateTime? LastSync { get; set; }
         public ConcurrentQueue<StorageItemChange> ChangesQueue { get; set; } = new ConcurrentQueue<StorageItemChange>();
@@ -127,7 +127,8 @@ namespace Comgenie.Storage.Entities
                     {
                         // There is already a lock file
                         var line = await new StreamReader(lockFile).ReadLineAsync();
-                        var moment = DateTime.Parse(line.Split('|')[0], CultureInfo.InvariantCulture);
+                        
+                        var moment = line != null ? DateTime.Parse(line.Split('|')[0], CultureInfo.InvariantCulture) : DateTime.MinValue;
                         if (moment.AddHours(1) > DateTime.UtcNow)
                         {
                             // Recent lock, we will wait
@@ -140,6 +141,12 @@ namespace Comgenie.Storage.Entities
                     {
                         // No lock file found! We will create one
                         lockFile = Location.OpenFile("index-lock.cmg", FileMode.Create, FileAccess.Write);
+                        if (lockFile == null)
+                        {
+                            // Could not create file for IO or connection reasons, try again later
+                            await Task.Delay(3000); 
+                            continue;
+                        }
                         using (var writer = new StreamWriter(lockFile))
                             await writer.WriteLineAsync(DateTime.UtcNow.ToString(CultureInfo.InvariantCulture) + "|" + lockId);
                         lockFile.Dispose();
@@ -154,7 +161,7 @@ namespace Comgenie.Storage.Entities
                         
                         var line = await new StreamReader(lockFile).ReadLineAsync();
                         lockFile.Dispose();
-                        if (line.Split('|')[1] != lockId)
+                        if (line != null && line.Split('|')[1] != lockId)
                             continue; // Not our lock id, some other client got lucky
 
                         // We got a lock! 
@@ -166,14 +173,21 @@ namespace Comgenie.Storage.Entities
                 await LoadIndexAsync(true);
             }
 
+            if (Index == null)
+                return;
+
             lock (Index)
             {
                 Index.LastModified = DateTime.UtcNow;
                 using (var file = Location.OpenFile("index.cmg", FileMode.Create, FileAccess.Write))
-                using (var encStream = new EncryptedAndRepairableStream(file, EncryptionKey, EnableRepairData))
-                    JsonSerializer.SerializeAsync(encStream, Index).Wait();
-            }
+                {
+                    if (file == null)
+                        throw new Exception("Could not create index file");
 
+                    using (var encStream = new EncryptedAndRepairableStream(file, EncryptionKey, EnableRepairData))
+                        JsonSerializer.SerializeAsync(encStream, Index).Wait();
+                }
+            }
 
             if (Shared)
             {

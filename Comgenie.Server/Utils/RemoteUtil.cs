@@ -1,4 +1,6 @@
 ﻿using Comgenie.Server.Handlers;
+using Comgenie.Server.Handlers.Http;
+using Comgenie.Server.Handlers.Smtp;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -8,7 +10,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using static Comgenie.Server.Handlers.HttpHandler;
+using static Comgenie.Server.Handlers.Http.HttpHandler;
 
 namespace Comgenie.Server.Utils
 {

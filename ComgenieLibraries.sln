@@ -21,6 +21,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "StorageExample", "StorageEx
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MailServerExample", "MailServerExample\MailServerExample.csproj", "{8C60CD10-60B6-4F41-B382-BBDFE4DD964B}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Comgenie.Util", "Comgenie.Util\Comgenie.Util.csproj", "{000CA4B4-61A3-469E-AA21-B93640D8F01D}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -47,6 +49,10 @@ Global
 		{8C60CD10-60B6-4F41-B382-BBDFE4DD964B}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{8C60CD10-60B6-4F41-B382-BBDFE4DD964B}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{8C60CD10-60B6-4F41-B382-BBDFE4DD964B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{000CA4B4-61A3-469E-AA21-B93640D8F01D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{000CA4B4-61A3-469E-AA21-B93640D8F01D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{000CA4B4-61A3-469E-AA21-B93640D8F01D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{000CA4B4-61A3-469E-AA21-B93640D8F01D}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

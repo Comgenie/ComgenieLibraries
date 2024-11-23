@@ -1,4 +1,4 @@
-﻿using Comgenie.Storage.Utils;
+﻿using Comgenie.Utils;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -13,7 +13,7 @@ namespace Comgenie.Storage.Locations
     public class AzureBlobStorageLocation : IStorageLocation
     {
         // TODO: Use page blobs instead of block blobs
-        private string SasUrl { get; set; }
+        private string? SasUrl { get; set; }
         public AzureBlobStorageLocation() { }
         public AzureBlobStorageLocation(string containerSasUrl)
         {
@@ -22,6 +22,8 @@ namespace Comgenie.Storage.Locations
 
         public void DeleteFile(string path)
         {
+            if (SasUrl == null)
+                throw new Exception("Azure blob storage connection is not configured.");
             // Use a HTTP DELETE request to delete the blob from the storage account using the SAS URL.
             var url = SasUrl.Substring(0, SasUrl.IndexOf("?")) + "/" + path + SasUrl.Substring(SasUrl.IndexOf("?"));
 
@@ -50,6 +52,8 @@ namespace Comgenie.Storage.Locations
         }
         public void MoveFile(string oldPath, string newPath)
         {
+            if (SasUrl == null)
+                throw new Exception("Azure blob storage connection is not configured.");
             // Use a HTTP PUT request to rename the blob in the storage account using the SAS URL.
             var url = SasUrl.Substring(0, SasUrl.IndexOf("?")) + "/" + newPath + SasUrl.Substring(SasUrl.IndexOf("?")) + "&comp=rename";
             var urlOld = SasUrl.Substring(0, SasUrl.IndexOf("?")) + "/" + oldPath + SasUrl.Substring(SasUrl.IndexOf("?"));
@@ -74,7 +78,6 @@ namespace Comgenie.Storage.Locations
         private async Task UploadBlockBlobFromStream(string url, Stream stream)
         {
             var blockIdCount = 0;
-
             var buffer = new byte[1024 * 1024 * 10];
             var bufferOffset = 0;
             long totalOffset = 0;
@@ -130,6 +133,9 @@ namespace Comgenie.Storage.Locations
         }
         public Stream? OpenFile(string path, FileMode mode, FileAccess access)
         {
+            if (SasUrl == null)
+                throw new Exception("Azure blob storage connection is not configured.");
+
             var url = SasUrl.Substring(0, SasUrl.IndexOf("?")) + "/" + path + SasUrl.Substring(SasUrl.IndexOf("?"));
 
             if (access == FileAccess.Read)

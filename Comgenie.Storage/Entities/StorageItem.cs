@@ -8,7 +8,7 @@ namespace Comgenie.Storage.Entities
 {
     public class StorageItem
     {
-        public string Id { get; set; }
+        public required string Id { get; set; }
         public DateTime LastModified { get; set; }
         public DateTime Created { get; set; }
         public List<string> Tags { get; set; } = new List<string>();

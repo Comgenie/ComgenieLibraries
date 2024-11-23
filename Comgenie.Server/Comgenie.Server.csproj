@@ -1,17 +1,19 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net7.0</TargetFramework>
+    <TargetFramework>net9.0</TargetFramework>
     <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
     <Title>Comgenie Server</Title>
     <Authors>Comgenie</Authors>
     <Company>Comgenie</Company>
     <Description>This library gives the ability to run http and smtp servers from your own code</Description>
-    <Version>2023.9.23.1</Version>
-    <RepositoryUrl></RepositoryUrl>
+    <Version>2024.11.23.1</Version>
+    <RepositoryUrl>https://github.com/Comgenie/ComgenieLibraries.git</RepositoryUrl>
     <PackageProjectUrl>https://github.com/Comgenie/ComgenieLibraries</PackageProjectUrl>
     <PackageIcon>icon.png</PackageIcon>
     <Nullable>enable</Nullable>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>web server;smtp server;lightweight;cross platform;fast</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
@@ -19,6 +21,10 @@
       <Pack>True</Pack>
       <PackagePath>\</PackagePath>
     </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Comgenie.Util\Comgenie.Util.csproj" />
   </ItemGroup>
 
 </Project>

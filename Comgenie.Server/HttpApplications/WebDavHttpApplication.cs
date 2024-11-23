@@ -1,4 +1,4 @@
-﻿using Comgenie.Server.Handlers;
+﻿using Comgenie.Server.Handlers.Http;
 using Comgenie.Server.Utils;
 using System;
 using System.Collections.Generic;
@@ -7,17 +7,16 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Web;
-using static Comgenie.Server.Handlers.HttpHandler;
 
 namespace Comgenie.Server.HttpApplications
 {
     public abstract class WebDavHttpApplication
     {
-        public HttpHandler.HttpResponse Index(HttpHandler.HttpClientData httpClientData)
+        public HttpResponse Index(HttpClientData httpClientData)
         {
             return Other(httpClientData);
         }
-        public HttpHandler.HttpResponse Other(HttpHandler.HttpClientData httpClientData)
+        public HttpResponse Other(HttpClientData httpClientData)
         {
             Console.WriteLine(httpClientData.Method + " " + httpClientData.RequestRaw);
             Console.WriteLine("Short url: " + httpClientData.RequestPageShort);
@@ -26,6 +25,9 @@ namespace Comgenie.Server.HttpApplications
                
                 Console.WriteLine("HEADER " + h.Key + ": " + (h.Key == "Authorization" ? "XXX" : h.Value));
             }
+
+            if (httpClientData.RequestPageShort == null)
+                return new HttpResponse(400, "Incorrect request");
 
             string? username = null;
             string? password = null;
@@ -47,7 +49,7 @@ namespace Comgenie.Server.HttpApplications
 
             if (authObject == null)
             {
-                return new HttpHandler.HttpResponse()
+                return new HttpResponse()
                 {
                     StatusCode = 401,
                     Headers = new Dictionary<string, string>()
@@ -59,7 +61,7 @@ namespace Comgenie.Server.HttpApplications
 
             if (httpClientData.Method == "OPTIONS")
             {
-                return new HttpHandler.HttpResponse()
+                return new HttpResponse()
                 {
                     StatusCode = 200,
                     ContentType = "text/plain",
@@ -77,8 +79,8 @@ namespace Comgenie.Server.HttpApplications
                 var result = DeleteFile(authObject, httpClientData.RequestPageShort);
 
                 if (!result)
-                    return new HttpHandler.HttpResponse(404, new { Error = "Item not found" });
-                return new HttpHandler.HttpResponse(204, new { Success = true });                
+                    return new HttpResponse(404, new { Error = "Item not found" });
+                return new HttpResponse(204, new { Success = true });                
             }
 
             if (httpClientData.Method == "GET" || httpClientData.Method == "HEAD")
@@ -86,11 +88,11 @@ namespace Comgenie.Server.HttpApplications
                 // Download file
                 var file = GetFile(authObject, httpClientData.RequestPageShort);
                 if (file == null)
-                    return new HttpHandler.HttpResponse(404, new { Error = "Item not found" });
+                    return new HttpResponse(404, new { Error = "Item not found" });
 
                 if (!string.IsNullOrEmpty(file.LocalFileName))
                 {
-                    return new HttpHandler.HttpResponse()
+                    return new HttpResponse()
                     {
                         StatusCode = 200,
                         FileName = file.LocalFileName
@@ -98,10 +100,10 @@ namespace Comgenie.Server.HttpApplications
                 }
                 else
                 {
-                    return new HttpHandler.HttpResponse()
+                    return new HttpResponse()
                     {
                         StatusCode = 200,
-                        ContentLengthStream = file.FileSize,
+                        ContentLengthStream = file.FileSize ?? 0,
                         ContentType = file.ContentType,
                         Stream = file.Stream
                     };
@@ -111,7 +113,7 @@ namespace Comgenie.Server.HttpApplications
             if (httpClientData.Method == "PROPPATCH")
             {
                 // TODO, Handle correctly but this makes sure windows doesn't complain
-                return new HttpHandler.HttpResponse()
+                return new HttpResponse()
                 {
                     StatusCode = 200,
                     ContentType = "text/xml; charset=\"utf-8\"",
@@ -135,8 +137,8 @@ namespace Comgenie.Server.HttpApplications
                 httpClientData.DataStream.Position = 0;
                 var result = PutFile(authObject, httpClientData.RequestPageShort, httpClientData.DataStream, dateModified);
                 if (!result)
-                    return new HttpHandler.HttpResponse(409, new { Error = "Could not save file" });
-                return new HttpHandler.HttpResponse(200, new { Success = true });
+                    return new HttpResponse(409, new { Error = "Could not save file" });
+                return new HttpResponse(200, new { Success = true });
             }
 
             /*if (httpClientData.Method == "LOCK")
@@ -149,28 +151,28 @@ namespace Comgenie.Server.HttpApplications
             {
                 // Rename/move file
                 if (!httpClientData.Headers.ContainsKey("destination"))
-                    return new HttpHandler.HttpResponse(500, new { Error = "Missing destination" });
+                    return new HttpResponse(500, new { Error = "Missing destination" });
 
                 var newPath = GetWebDavFilePath(httpClientData, httpClientData.Headers["destination"]);                
 
                 var result = MoveFile(authObject, httpClientData.RequestPageShort, newPath);
                 if (!result)
-                    return new HttpHandler.HttpResponse(409, new { Error = "Could not move file" });
-                return new HttpHandler.HttpResponse(201, new { Success = true });
+                    return new HttpResponse(409, new { Error = "Could not move file" });
+                return new HttpResponse(201, new { Success = true });
             }
 
             if (httpClientData.Method == "COPY")
             {
                 // Copy file
                 if (!httpClientData.Headers.ContainsKey("destination"))
-                    return new HttpHandler.HttpResponse(500, new { Error = "Missing destination" });
+                    return new HttpResponse(500, new { Error = "Missing destination" });
                 
                 var newPath = GetWebDavFilePath(httpClientData, httpClientData.Headers["destination"]);
 
                 var result = CopyFile(authObject, httpClientData.RequestPageShort, newPath);
                 if (!result)
-                    return new HttpHandler.HttpResponse(409, new { Error = "Could not move file" });
-                return new HttpHandler.HttpResponse(201, new { Success = true });
+                    return new HttpResponse(409, new { Error = "Could not move file" });
+                return new HttpResponse(201, new { Success = true });
             }
 
             if (httpClientData.Method == "MKCOL")
@@ -181,8 +183,8 @@ namespace Comgenie.Server.HttpApplications
                     folderPath = folderPath.Substring(0, folderPath.Length - 1);
                 var result = MakeCollection(authObject, folderPath);
                 if (!result)
-                    return new HttpHandler.HttpResponse(409, new { Error = "Could not create folder" });
-                return new HttpHandler.HttpResponse(201, new { Success = true });
+                    return new HttpResponse(409, new { Error = "Could not create folder" });
+                return new HttpResponse(201, new { Success = true });
             }
 
             if (httpClientData.Method == "PROPFIND")
@@ -216,6 +218,7 @@ namespace Comgenie.Server.HttpApplications
                     var exi = allFiles.FirstOrDefault(a => a.Name.ToLower().Trim().EndsWith(fileOrFolderName.ToLower().Trim()));
                     if (exi != null)
                         Console.WriteLine("Found with similar name: " + exi.Name);
+
                     // Not found
                     sb.AppendLine("<propfind xmlns=\"DAV:\">");
                     sb.AppendLine("<href>" + HttpUtility.HtmlEncode(GetApplicationRootUrl(httpClientData, true)) + "</href>");
@@ -224,7 +227,8 @@ namespace Comgenie.Server.HttpApplications
                     sb.AppendLine("<status>HTTP/1.1 404 NOT FOUND</status>");
                     sb.AppendLine("</propstat>");
                     sb.AppendLine("</propfind>");
-                    return new HttpHandler.HttpResponse()
+
+                    return new HttpResponse()
                     {
                         StatusCode = 404,
                         ContentType = "text/xml; charset=\"utf-8\"",
@@ -310,7 +314,7 @@ namespace Comgenie.Server.HttpApplications
                 }
                 sb.AppendLine("</D:multistatus>");                
 
-                return new HttpHandler.HttpResponse()
+                return new HttpResponse()
                 {
                     StatusCode = 207, // Multi status
                     ContentType = "text/xml; charset=\"utf-8\"",
@@ -318,18 +322,22 @@ namespace Comgenie.Server.HttpApplications
                 };
             }
 
-            return new HttpHandler.HttpResponse(501, "Not Implemented");
+            return new HttpResponse(501, "Not Implemented");
         }
 
         // Returns the full external link for the current request, or the external link to just the webdav location
-        private string GetApplicationRootUrl(HttpHandler.HttpClientData clientData, bool fullRequestPage = false)
+        private string GetApplicationRootUrl(HttpClientData clientData, bool fullRequestPage = false)
         {
+            var host = clientData.Headers.ContainsKey("host") ? clientData.Headers["host"].ToString() : clientData.Host;
+            var proto = (clientData.Client.StreamIsEncrypted ? "https" : "http");
+
+            if (clientData.RequestPage == null || clientData.Request == null || clientData.RequestPageShort == null)
+                return proto + "://" + host;
+
             var routePrefix = fullRequestPage ? clientData.RequestPage : clientData.RequestPage.Substring(0, clientData.Request.Length - clientData.RequestPageShort.Length);
             if (!routePrefix.EndsWith("/"))
                 routePrefix += "/";
 
-            var host = clientData.Headers.ContainsKey("host") ? clientData.Headers["host"].ToString() : clientData.Host;
-            var proto = (clientData.Client.StreamIsEncrypted ? "https" : "http");
 
             if (clientData.Headers.ContainsKey("x-forwarded-host"))
                 host = clientData.Headers["x-forwarded-host"].ToString();
@@ -340,7 +348,7 @@ namespace Comgenie.Server.HttpApplications
         }
 
         // Turns a full request path to just the webdav file path
-        private string GetWebDavFilePath(HttpHandler.HttpClientData clientData, string path)
+        private string GetWebDavFilePath(HttpClientData clientData, string path)
         {
             // Remove the hostname part of the request http://localhost/dav/test.txt -> /dav/test.txt
             if (path.ToLower().StartsWith("http"))
@@ -355,7 +363,7 @@ namespace Comgenie.Server.HttpApplications
             // RequestPage:  /dav/file.txt
             // RequestPageShort: /file.txt
 
-            var beforeRequestPageShort = clientData.RequestPage.Substring(0, clientData.Request.Length - clientData.RequestPageShort.Length);
+            var beforeRequestPageShort = clientData.RequestPage!.Substring(0, clientData.Request!.Length - clientData.RequestPageShort!.Length);
             if (!beforeRequestPageShort.EndsWith("/"))
                 beforeRequestPageShort += "/";
             // /dav/
@@ -366,9 +374,9 @@ namespace Comgenie.Server.HttpApplications
         }
 
 
-        public abstract object CheckAuthorization(HttpHandler.HttpClientData httpClientData, string username, string password);
-        public abstract WebDavFileContent GetFile(object authObject, string path);
-        public abstract WebDavFileInfo GetFileInfo(object authObject, string path);
+        public abstract object CheckAuthorization(HttpClientData httpClientData, string? username, string? password);
+        public abstract WebDavFileContent? GetFile(object authObject, string path);
+        public abstract WebDavFileInfo? GetFileInfo(object authObject, string path);
         public abstract List<WebDavFileInfo> ListFiles(object authObject, string path);        
         public abstract bool DeleteFile(object authObject, string path);
         public abstract bool MoveFile(object authObject, string pathOld, string pathNew);
@@ -378,9 +386,9 @@ namespace Comgenie.Server.HttpApplications
 
         public class WebDavFileInfo
         {
-            public string Name { get; set; }
+            public required string Name { get; set; }
             public bool IsCollection { get; set; }
-            public string ContentType { get; set; }
+            public string? ContentType { get; set; }
             public long Size { get; set; }
             public DateTime LastModified { get; set; }
         }
@@ -398,9 +406,9 @@ namespace Comgenie.Server.HttpApplications
             }
 
             public string? LocalFileName { get; set; }
-            public long FileSize { get; set; }
-            public Stream Stream { get; set; }
-            public string ContentType { get; set; }
+            public long? FileSize { get; set; }
+            public Stream? Stream { get; set; }
+            public string? ContentType { get; set; }
         }
     }
 }

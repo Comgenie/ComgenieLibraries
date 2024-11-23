@@ -8,8 +8,8 @@ namespace Comgenie.Storage.Entities
 {
     internal class StorageItemChange
     {
-        public StorageLocationInfo LocationInfo { get; set; }
-        public StorageItem Item { get; set; }
-        public bool DataChanged { get; set; }
+        public required StorageLocationInfo LocationInfo { get; set; }
+        public required StorageItem Item { get; set; }
+        public required bool DataChanged { get; set; }
     }
 }

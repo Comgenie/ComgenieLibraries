@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 
 namespace Comgenie.Storage.Locations
 {
+
     public class ArchiveStorageLocation : IStorageLocation
     {
         private string? ArchivePath { get; set; }

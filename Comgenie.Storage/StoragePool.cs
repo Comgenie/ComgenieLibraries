@@ -1,6 +1,6 @@
 ﻿using Comgenie.Storage.Entities;
 using Comgenie.Storage.Locations;
-using Comgenie.Storage.Utils;
+using Comgenie.Utils;
 using System;
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
@@ -111,6 +111,9 @@ namespace Comgenie.Storage
             if (sourceItem.StorageLocationInfo == null || sourceItem.StorageLocationInfo == targetLocationInfo)
                 throw new ArgumentException("Cannot sync to the same location, or from an undefined location");
 
+            if (targetLocationInfo.Index == null)
+                return; // Index not loaded (yet)
+
             if (sourceItem.Length == -1) // Deleted
             {
                 if (targetLocationInfo.Index.Items.TryGetValue(sourceItem.Id, out StorageItem? ourItem))
@@ -146,8 +149,16 @@ namespace Comgenie.Storage
 
                 if (includeData)
                 {
-                    using (var source = new EncryptedAndRepairableStream(sourceItem.StorageLocationInfo.Location.OpenFile(GetStorageItemFileName(sourceItem), FileMode.Open, FileAccess.Read), sourceItem.StorageLocationInfo.EncryptionKey, sourceItem.StorageLocationInfo.EnableRepairData))
-                    using (var target = new EncryptedAndRepairableStream(targetLocationInfo.Location.OpenFile(GetStorageItemFileName(ourItem), FileMode.Create, FileAccess.Write), targetLocationInfo.EncryptionKey, targetLocationInfo.EnableRepairData))
+                    var sourceStream = sourceItem.StorageLocationInfo.Location.OpenFile(GetStorageItemFileName(sourceItem), FileMode.Open, FileAccess.Read);
+                    if (sourceStream == null)
+                        throw new Exception("Could not open source file for syncing");
+
+                    var targetStream = targetLocationInfo.Location.OpenFile(GetStorageItemFileName(ourItem), FileMode.Create, FileAccess.Write);
+                    if (targetStream == null)
+                        throw new Exception("Could not open target file for syncing");
+
+                    using (var source = new EncryptedAndRepairableStream(sourceStream, sourceItem.StorageLocationInfo.EncryptionKey, sourceItem.StorageLocationInfo.EnableRepairData))
+                    using (var target = new EncryptedAndRepairableStream(targetStream, targetLocationInfo.EncryptionKey, targetLocationInfo.EnableRepairData))
                     {
                         if (source != null && target != null)
                             await source.CopyToAsync(target);
@@ -170,11 +181,14 @@ namespace Comgenie.Storage
                     await locationInfo.LoadIndexAsync();
                 }
 
+                if (locationInfo.Index == null)
+                    continue; // Index not loaded yet
+
                 foreach (var item in locationInfo.Index.Items.Values)
                 {
                     foreach (var locationInfoOther in LocationInfos)
                     {
-                        if (!locationInfoOther.Available)
+                        if (!locationInfoOther.Available || locationInfoOther.Index == null)
                             continue;
 
                         if (locationInfoOther.Index.Items.TryGetValue(item.Id, out var otherItem))
@@ -203,7 +217,7 @@ namespace Comgenie.Storage
             {
                 foreach (var location in LocationInfos)
                 {
-                    if (location.Index.Items.ContainsKey(itemId))
+                    if (location.Index != null && location.Index.Items.ContainsKey(itemId))
                     {
                         item = location.Index.Items[itemId];
                         return location;
@@ -262,7 +276,10 @@ namespace Comgenie.Storage
         {
             var storageLocation = GetStorageLocationForItem(oldItemId, out StorageItem? oldItem);
             var storageLocationNew = GetStorageLocationForItem(newItemId, out StorageItem? newItem);
-            if (storageLocation == null || oldItem == null || (storageLocationNew != null && newItem.Length >= 0))
+            if (storageLocation == null || oldItem == null || (storageLocationNew != null && newItem != null && newItem.Length >= 0))
+                return false;
+
+            if (storageLocation.Index == null)
                 return false;
 
             newItem = new StorageItem()
@@ -329,7 +346,7 @@ namespace Comgenie.Storage
             StorageItem? item = null;
             foreach (var location in LocationInfos)
             {
-                if (location.Index.Items.ContainsKey(itemId))
+                if (location.Index != null && location.Index.Items.ContainsKey(itemId))
                 {
                     storageLocation = location;
                     item = location.Index.Items[itemId];
@@ -343,7 +360,7 @@ namespace Comgenie.Storage
             if (item == null || storageLocation == null)
             {
                 // Find best location matching our tag filter
-                storageLocation = LocationInfos.Where(a => a.Available && (a.TagFilters == null || TagFilter(a.TagFilters, overwriteTags))).OrderBy(a => a.Priority).FirstOrDefault();
+                storageLocation = LocationInfos.Where(a => a.Available && a.Index != null && (a.TagFilters == null || TagFilter(a.TagFilters, overwriteTags))).OrderBy(a => a.Priority).FirstOrDefault();
                 if (storageLocation == null)
                     throw new Exception("No storage location available or none with matching tagfilters");
 
@@ -356,7 +373,7 @@ namespace Comgenie.Storage
                 };                                       
                 item.StorageLocationInfo = storageLocation;
                 storageItemChanged = true;
-                storageLocation.Index.Items[itemId] = item;
+                storageLocation.Index!.Items[itemId] = item;
             }
 
             if (overwriteTags != null)
@@ -408,7 +425,7 @@ namespace Comgenie.Storage
         public async Task DeleteAsync(string itemId)
         {
             var storageLocation = GetStorageLocationForItem(itemId, out StorageItem? item);
-            if (storageLocation == null)
+            if (storageLocation == null || item == null)
                 return;
 
             // Update index
@@ -481,13 +498,13 @@ namespace Comgenie.Storage
                 return ListAndConvert<T>(filter);                
             });
         }
-        private IEnumerable<T> ListAndConvert<T>(string filter)
+        private IEnumerable<T> ListAndConvert<T>(string filter) where T : class
         {
             var storageItems = List(filter);
             foreach (var storageItem in storageItems)
             {
                 // TODO: Create new T and fill properties (normal properties + tags)
-                yield return default(T);
+                yield return default(T)!;
             }
         }
 

@@ -1,4 +1,6 @@
 ﻿using Comgenie.Server.Handlers;
+using Comgenie.Server.Handlers.Imap;
+using Comgenie.Server.Handlers.Smtp;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -103,13 +105,13 @@ namespace Comgenie.Server
                 if (!File.Exists(domain + ".pfx"))
                     GenerateSelfSignedCertificate(domain);
 
-                var certificate = new X509Certificate2(domain + ".pfx", PfxKey); // TODO: Don't hardcode password
+                var certificate = X509CertificateLoader.LoadPkcs12FromFile(domain + ".pfx", PfxKey);// new X509Certificate2(domain + ".pfx", PfxKey);
                 if (DateTime.UtcNow > certificate.NotAfter)
                 {
                     // Certificate is not valid anymore, generate a new self-signed one
                     certificate.Dispose();
                     GenerateSelfSignedCertificate(domain);
-                    certificate = new X509Certificate2(domain + ".pfx", PfxKey);
+                    certificate = X509CertificateLoader.LoadPkcs12FromFile(domain + ".pfx", PfxKey);
                 }
 
                 if (ServerCertificates.ContainsKey(domain)) // Reload           

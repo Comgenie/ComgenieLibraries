@@ -360,7 +360,7 @@ namespace Comgenie.Server.Utils
             return mailAddressWithNameAndExtras;
         }
 
-        private static bool AcceptAllCertificates(object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors sslPolicyErrors)
+        private static bool AcceptAllCertificates(object sender, X509Certificate? certificate, X509Chain? chain, SslPolicyErrors sslPolicyErrors)
         {
             // There is this fun technique called 'DANE' to offer certificates using a different subject name by using special TLSA dns records
             // Since we do not support it yet, we will have an ugly option to just disable the certificate check to make sending mails work
@@ -512,7 +512,7 @@ namespace Comgenie.Server.Utils
             {
                 try
                 {
-                    System.Net.ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls11 | SecurityProtocolType.Tls12;
+                    //System.Net.ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls11 | SecurityProtocolType.Tls12;
                     using (var client = new HttpClient())
                     {
                         var data = await client.GetStringAsync("https://dns.google.com/resolve?name=" + domain + "&type="+type);

@@ -1,4 +1,4 @@
-﻿using Comgenie.Server.Handlers;
+﻿using Comgenie.Server.Handlers.Http;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -20,13 +20,13 @@ namespace Comgenie.Server.Utils
         private string LetsEncryptAPI { get; set; }
         private string AccountSettingsFile { get; set; }       
         private string AccountEmail { get; set; }
-        private string AccountKeyId { get; set; }
+        private string? AccountKeyId { get; set; }
         private RSACryptoServiceProvider AccountKey { get; set; }
         private Jwk AccountKeyMessage { get; set; }
         private HttpHandler Http { get; set; }
         private Server Server { get; set; }
         private JsonSerializerOptions JsonSettings { get; set; }
-        private string Nonce { get; set; }
+        private string? Nonce { get; set; }
 
         public LetsEncryptUtil(Server server, HttpHandler httpHandler, string accountEmail, bool useStaging = false)
         {
@@ -48,11 +48,17 @@ namespace Comgenie.Server.Utils
             if (File.Exists(keyFile))
             {
                 var accountSetings = JsonSerializer.Deserialize<AccountSettings>(File.ReadAllText(keyFile), JsonSettings);
+                if (accountSetings?.KeyId == null || accountSetings?.RSAKey == null)
+                    throw new Exception("Could not load existing letsencrypt key file");
+                
                 AccountKeyId = accountSetings.KeyId;
                 AccountKey.ImportCspBlob(accountSetings.RSAKey);
             }
 
-            var publicParameters = AccountKey.ExportParameters(false);            
+            var publicParameters = AccountKey.ExportParameters(false);
+            if (publicParameters.Exponent == null || publicParameters.Modulus == null)
+                throw new Exception("Missing account key parameters for letsencrypt");
+            
             AccountKeyMessage = new Jwk
             {
                 Kty = "RSA",
@@ -94,7 +100,7 @@ namespace Comgenie.Server.Utils
         {
             if (!force && File.Exists(domain + ".pfx"))
             {
-                using (var certificate = new X509Certificate2(domain + ".pfx", Server.GetPfxKey()))
+                using (var certificate = X509CertificateLoader.LoadPkcs12FromFile(domain + ".pfx", Server.GetPfxKey()))
                 {
                     // Check if certificate we have is still valid for at least 14 days, if so: we don't have to do anything (unless force = true)                    
                     if (certificate.Issuer.Contains("Let's Encrypt") && DateTime.UtcNow.AddDays(14) < certificate.NotAfter) 
@@ -117,7 +123,7 @@ namespace Comgenie.Server.Utils
 
 
             // Get nonce (needed for the Jws messages)
-            if (!GetNonce())
+            if (!GetNonce() || Nonce == null)
                 throw new Exception("Could not retrieve nonce");
 
             // Create or verify LetsEncrypt account
@@ -128,17 +134,18 @@ namespace Comgenie.Server.Utils
                 termsOfServiceAgreed = true
             });
 
-            if (response["type"] != null && response["type"].ToString() == "urn:ietf:params:acme:error:userActionRequired")
+            if (response != null && response["type"] != null && response["type"]?.ToString() == "urn:ietf:params:acme:error:userActionRequired")
             {
                 // TODO: Send an update that we accepted the new terms
                 Log.Warning(nameof(LetsEncryptUtil), "LetsEncrypt says an user action is required: " + JsonSerializer.Serialize(response));
                 return false;
             }
 
-            if (response["status"] == null)
+            if (response == null || response["status"] == null)
                 throw new Exception("Invalid response after creating account " + JsonSerializer.Serialize(response));
-            if (response["status"].ToString() != "valid")
-                throw new Exception("Account status is: " + response["status"].ToString());
+
+            if (response["status"]?.ToString() != "valid")
+                throw new Exception("Account status is: " + response["status"]?.ToString());
 
             SaveKeyFile(); // If we haven't had an AccountKeyId before, we have one now           
 
@@ -156,7 +163,7 @@ namespace Comgenie.Server.Utils
             var CSR = Base64UrlEncoded(certificateRequest.CreateSigningRequest());
 
             // Order certificate for domain /acme/new-order
-            string orderUrl;
+            string? orderUrl;
             response = JwsRequest(LetsEncryptAPI + "/new-order", new
             {
                 identifiers = new object[] {
@@ -166,46 +173,52 @@ namespace Comgenie.Server.Utils
                 //notAfter = DateTime.UtcNow.AddDays(60).ToString("o") // The requested value of the notAfter field in the certificate 
             }, out orderUrl);
 
+            if (orderUrl == null)
+                throw new Exception("Missing order url in letsencrypt response");
+
             // We will get a string[] back ( authorizations ), containing urls ( /acme/authz/<Identifier> ) to retrieve our challenges
-            if (response["authorizations"] == null)
+            if (response == null || response["authorizations"] == null)
                 throw new Exception("Error when ordering the certificate, authorizations property missing. " + JsonSerializer.Serialize(response));
-
+            
             List<string> authUrls = new List<string>();
-            foreach (var url in response["authorizations"].AsArray())
-                authUrls.Add(url.GetValue<string>());
-
+            foreach (var url in response["authorizations"]!.AsArray())
+                authUrls.Add(url!.GetValue<string>());
+            
             // We also get a finalize url back (finalize), containing the url to call after the challenges are accepted.
             if (response["finalize"] == null)
                 throw new Exception("Error when ordering the certificate, finalize property missing. " + JsonSerializer.Serialize(response));
-            var finalizeUrl = response["finalize"].ToString();
+            var finalizeUrl = response["finalize"]!.ToString();
 
             if (response["status"] == null)
                 throw new Exception("Error when ordering the certificate, status property missing. " + JsonSerializer.Serialize(response));
 
-            if (response["status"].ToString() == "pending") // We need to do the challenge(s)
+            if (response["status"]!.ToString() == "pending") // We need to do the challenge(s)
             {
                 // List challenges
                 foreach (var authUrl in authUrls)
                 {
                     // - request each Identifier Authorization challenge at:  /acme/authz/<Identifier>
                     response = JwsRequest(authUrl, null);
+                    if (response == null)
+                        continue;
+
                     if (response["status"] == null)
                         throw new Exception("Error when requesting the authorization, status missing. " + JsonSerializer.Serialize(response));
 
-                    if (response["status"].ToString() != "pending")
+                    if (response["status"]!.ToString() != "pending")
                         throw new Exception("Error when requesting the authorization, status is not pending. " + JsonSerializer.Serialize(response));
 
                     // - Find http challenge ( type = http-01 ) and get token
                     if (response["challenges"] == null)
                         throw new Exception("Error when requesting the authorization, challenges missing. " + JsonSerializer.Serialize(response));
 
-                    foreach (var challengeValue in response["challenges"].AsArray())
+                    foreach (var challengeValue in response["challenges"]!.AsArray())
                     {
-                        if (challengeValue["type"] == null || challengeValue["url"] == null || challengeValue["token"] == null || challengeValue["type"].ToString() != "http-01")
+                        if (challengeValue == null || challengeValue["type"] == null || challengeValue["url"] == null || challengeValue["token"] == null || challengeValue["type"]!.ToString() != "http-01")
                             continue;
 
-                        var challengeVerifyUrl = challengeValue["url"].ToString();
-                        var challengeToken = challengeValue["token"].ToString();
+                        var challengeVerifyUrl = challengeValue["url"]!.ToString();
+                        var challengeToken = challengeValue["token"]!.ToString();
 
                         // - Host our file at: http://<YOUR_DOMAIN>/.well-known/acme-challenge/<TOKEN>
                         //   with file contents token || '.' || base64url(Thumbprint(accountKey))
@@ -224,11 +237,16 @@ namespace Comgenie.Server.Utils
                         while (true)
                         {
                             var responseVerify = JwsRequest(challengeVerifyUrl, new { });
+                            if (responseVerify == null)
+                            {
+                                Thread.Sleep(5 * 1000); // Retry in 5 sec
+                                continue;
+                            }
 
                             if (responseVerify["status"] == null)
                                 throw new Exception("Error when verifying the challenge, status missing. " + JsonSerializer.Serialize(response));
 
-                            if (responseVerify["status"].ToString() != "valid")
+                            if (responseVerify["status"]!.ToString() != "valid")
                             {
                                 Thread.Sleep(5 * 1000); // Retry in 5 sec
                                 continue;
@@ -249,16 +267,22 @@ namespace Comgenie.Server.Utils
             {
                 csr = CSR,
             });
+            if (response == null)
+                throw new Exception("Did not get a valid JwsRequest response");
+
             if (response["status"] == null)
                 throw new Exception("Error when requesting the finalize step, status missing. " + JsonSerializer.Serialize(response));
 
             // Wait for 'processing' step
-            while (response["status"].ToString() == "processing")
+            while (response["status"]!.ToString() == "processing")
             {
                 Thread.Sleep(5 * 1000);
                 response = JwsRequest(orderUrl, null);
+                if (response == null || response["status"] == null)
+                    throw new Exception("Did not get a valid JwsRequest response");
             }            
-            if (response["status"].ToString() != "valid")
+
+            if (response["status"]!.ToString() != "valid")
                 throw new Exception("Error when requesting the finalize step, status is not valid. " + JsonSerializer.Serialize(response));
 
             // We will get a certificate string back (certificate), containing the url to download the .cer certificate ( /acme/cert/<Identifier> )
@@ -267,13 +291,13 @@ namespace Comgenie.Server.Utils
 
             // Download certificate /acme/cert/<Identifier> 
             // Accept: application/pem-certificate-chain
-            var certUrl = response["certificate"].ToString();
-            var pemCertificateData = JwsRequestBytes(certUrl, null, out string unused);
+            var certUrl = response["certificate"]!.ToString();
+            var pemCertificateData = JwsRequestBytes(certUrl, null, out _);
                 
             // Combine cert with certificateRequest and export an .pfx
-            var cert = new X509Certificate2(pemCertificateData);
+            var cert = X509CertificateLoader.LoadCertificate(pemCertificateData);
             cert = cert.CopyWithPrivateKey(certificateKey);
-            File.WriteAllBytes(domain + ".pfx", cert.Export(X509ContentType.Pfx, Server.GetPfxKey()));                
+            File.WriteAllBytes(domain + ".pfx", cert.Export(X509ContentType.Pkcs12, Server.GetPfxKey()));                
             
             return true; // return true if we have a new certificate (this is used to instruct the Server to pick it up)
         }
@@ -306,15 +330,15 @@ namespace Comgenie.Server.Utils
             }
             return false;            
         }
-        private JsonObject JwsRequest(string url, object payload)
+        private JsonObject? JwsRequest(string url, object? payload)
         {
-            return JwsRequest(url, payload, out string unused);
+            return JwsRequest(url, payload, out _);
         }
-        private JsonObject JwsRequest(string url, object payload, out string location)
+        private JsonObject? JwsRequest(string url, object? payload, out string? location)
         {
-            return JsonObject.Parse(ASCIIEncoding.UTF8.GetString(JwsRequestBytes(url, payload, out location))).AsObject();
+            return JsonObject.Parse(ASCIIEncoding.UTF8.GetString(JwsRequestBytes(url, payload, out location)))?.AsObject();
         }
-        private byte[] JwsRequestBytes(string url, object payload, out string location)
+        private byte[] JwsRequestBytes(string url, object? payload, out string? location)
         {
             location = null;
             var JwkRequired = url.Contains("new-acct") || url.Contains("revoke");

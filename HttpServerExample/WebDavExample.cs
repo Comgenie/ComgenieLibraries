@@ -1,4 +1,4 @@
-﻿using Comgenie.Server.Handlers;
+﻿using Comgenie.Server.Handlers.Http;
 using Comgenie.Server.HttpApplications;
 using System.Text;
 
@@ -7,7 +7,7 @@ namespace HttpServerExample
 
     public class WebDavExample : WebDavHttpApplication
     {
-        public override object CheckAuthorization(HttpHandler.HttpClientData httpClientData, string username, string password)
+        public override object CheckAuthorization(HttpClientData httpClientData, string? username, string? password)
         {
             // Return null to trigger a 401 Unauthorized response with a Basic realm header.
             // Return any other object to pass it to the other methods.
@@ -20,7 +20,7 @@ namespace HttpServerExample
             return true;
         }
 
-        public override WebDavFileContent GetFile(object authObject, string path)
+        public override WebDavFileContent? GetFile(object authObject, string path)
         {
             if (path == "Example Folder/Example File.txt")
             {
@@ -31,7 +31,7 @@ namespace HttpServerExample
             }
             return null;
         }
-        public override WebDavFileInfo GetFileInfo(object authObject, string path)
+        public override WebDavFileInfo? GetFileInfo(object authObject, string path)
         {
             if (path == "Example Folder/Example File.txt")
             {

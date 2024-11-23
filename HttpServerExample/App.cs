@@ -1,4 +1,4 @@
-﻿using Comgenie.Server.Handlers;
+﻿using Comgenie.Server.Handlers.Http;
 using System.Text;
 
 namespace HttpServerExample
@@ -7,9 +7,9 @@ namespace HttpServerExample
     internal class App
     {
         // /app
-        public async Task<HttpHandler.HttpResponse> Index(HttpHandler.HttpClientData httpClientData)
+        public HttpResponse Index(HttpClientData httpClientData)
         {
-            return new HttpHandler.HttpResponse()
+            return new HttpResponse()
             {
                 StatusCode = 200,
                 Data = Encoding.UTF8.GetBytes("Hi welcome at /app !")
@@ -17,9 +17,9 @@ namespace HttpServerExample
         }
 
         // /app/ReverseText
-        public HttpHandler.HttpResponse ReverseText(HttpHandler.HttpClientData httpClientData, string text = "default value")
+        public HttpResponse ReverseText(HttpClientData httpClientData, string text = "default value")
         {
-            return new HttpHandler.HttpResponse()
+            return new HttpResponse()
             {
                 StatusCode = 200,
                 ContentType = "text/plain",
@@ -28,21 +28,21 @@ namespace HttpServerExample
         }
 
         // /app/TimesTwo
-        public async Task<HttpHandler.HttpResponse> TimesTwo(HttpHandler.HttpClientData httpClientData, ExampleDTO dto)
+        public async Task<HttpResponse> TimesTwo(HttpClientData httpClientData, ExampleDTO dto)
         {
             if (dto == null)
-                return new HttpHandler.HttpResponse(400, "Missing object");
+                return new HttpResponse(400, "Missing object");
 
             await Task.Delay(1000); // Example delay to demonstrate async abilities
 
             dto.Number *= 2;
-            return new HttpHandler.HttpResponse(200, dto);
+            return new HttpResponse(200, dto);
         }
 
         // /app/AllOtherMethods
-        public HttpHandler.HttpResponse Other(HttpHandler.HttpClientData httpClientData)
+        public HttpResponse Other(HttpClientData httpClientData)
         {
-            return new HttpHandler.HttpResponse()
+            return new HttpResponse()
             {
                 StatusCode = 200,
                 Data = Encoding.UTF8.GetBytes("Gonna catch them all")

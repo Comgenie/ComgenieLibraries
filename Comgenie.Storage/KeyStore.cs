@@ -1,4 +1,4 @@
-﻿using Comgenie.Storage.Utils;
+﻿using Comgenie.Utils;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -10,9 +10,12 @@ using System.Threading.Tasks;
 
 namespace Comgenie.Storage
 {
+    /// <summary>
+    /// Simple utility class to provide an encrypted Key/Value storage.
+    /// </summary>
     public class KeyStore
     {
-        private Dictionary<string, string> Data { get; set; }
+        private Dictionary<string, string?> Data { get; set; } = new();
         private string FileName { get; set; }
         private bool FileNameSpecified { get; set; }
         private byte[] EncryptionKey { get; set; }
@@ -22,7 +25,6 @@ namespace Comgenie.Storage
             FileName = fileName;
             EncryptionKey = encryptionKey;
             FileNameSpecified = fileNameSpecified;
-            Data = new Dictionary<string, string>();
         }
 
         public static KeyStore? Get(string identity, string password, string? fileName = null, bool createIfNotExists = false)
@@ -96,7 +98,9 @@ namespace Comgenie.Storage
                         return false;
 
                     var json = reader.ReadToEnd();
-                    var dict = JsonSerializer.Deserialize<Dictionary<string, string>>(json);
+                    var dict = JsonSerializer.Deserialize<Dictionary<string, string?>>(json);
+                    if (dict == null)
+                        return false;
                     Data = dict;
                     return true;
                 }
