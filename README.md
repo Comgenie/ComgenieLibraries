@@ -33,5 +33,15 @@ Available as [nuget package](https://www.nuget.org/packages/Comgenie.Storage/) .
 - Assign and search for files using tags
 - Support for custom storage locations
 - Sync to a shared storage location (can be accessed by multiple instances of the application)
-- The EncryptedAndRepairableStream class can also be used on its own to add encryption and repair data to any stream
 - See the StorageExample project for examples for most of the features listed above
+
+## Comgenie.Util
+Collection of useful utilities (used by both Comgenie.Server and Server.Storage)
+Available as [nuget package](https://www.nuget.org/packages/Comgenie.Util/) .
+
+- The EncryptedAndRepairableStream adds encryption and repair data to any stream
+- CallbackStream calls custom actions for each method executed on the stream
+- SubStream can create a smaller stream within a larger stream
+- ForwardStream to move data between two calls which don't provide any stream themselves but only consumes them.
+- SuperTree for a fast and memory efficient tag searcher, with wildcard support
+- QueryTranslator turns a linq-expression into a simple parsable text filter

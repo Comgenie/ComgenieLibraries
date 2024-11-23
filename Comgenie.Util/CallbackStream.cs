@@ -11,10 +11,28 @@ namespace Comgenie.Utils
     /// </summary>
     public class CallbackStream : Stream, IDisposable
     {
+        /// <summary>
+        /// Action executed when OnDispose is called on the stream.
+        /// </summary>
         public Action? OnDispose { get; set; } = null;
+        /// <summary>
+        /// Action executed when OnFlush is called on the stream.
+        /// </summary>
         public Action? OnFlush { get; set; } = null;
+
+        /// <summary>
+        /// Action executed when OnRead is called on the stream.
+        /// </summary>
         public Action<byte[], int, int>? OnRead { get; set; } = null;
+
+        /// <summary>
+        /// Action executed when OnWrite is called on the stream.
+        /// </summary>
         public Action<byte[], int, int>? OnWrite { get; set; } = null;
+
+        /// <summary>
+        /// Action executed when OnSeek is called on the stream.
+        /// </summary>
         public Action<long, SeekOrigin>? OnSeek { get; set; } = null;
 
         private Stream InnerStream { get; set; }
