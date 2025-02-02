@@ -34,15 +34,15 @@ namespace Comgenie.Server.Handlers.Http
                 AddRoute(domain, path + (method.Name == "Index" ? "" : method.Name == "Other" ? "/*" : "/" + (lowerCaseMethods ? method.Name.ToLower() : method.Name)), new Route()
                 {
                     HandleExecuteRequestAsync = async (client, data) => {
-                        if (data.Request == null)
+                        if (data.RequestRaw == null)
                             return null;
                         // Parse arguments
                         Dictionary<string, string> rawParameters = new Dictionary<string, string>();
-                        var parameterStart = data.Request.IndexOf("?");
+                        var parameterStart = data.RequestRaw.IndexOf("?");
                         if (parameterStart > 0)
                         {
                             // GET parameters
-                            GetParametersFromQueryString(rawParameters, data.Request.Substring(parameterStart + 1));
+                            GetParametersFromQueryString(rawParameters, data.RequestRaw.Substring(parameterStart + 1));
                         }
 
                         if (data.DataStream != null && data.DataStream.Length > 0)
