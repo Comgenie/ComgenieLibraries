@@ -10,6 +10,9 @@ using System.Text.Json;
 
 namespace Comgenie.Storage
 {
+    /// <summary>
+    /// A collection of different storage locations with the ability to sync some or all files in between them.
+    /// </summary>
     public partial class StoragePool : IDisposable
     {
         private Task? SyncTask = null;
@@ -26,7 +29,7 @@ namespace Comgenie.Storage
         /// <param name="syncInterval">Amount of seconds max till changes are synced to/from this location. Set to null to directly sync changes with supported storage locations</param>
         /// <param name="priority">A lower number means a prefered storage location which will be used for any initial reads/writes before sync. When two storage locations use the same priority, they will be chosen at random for each read/write.</param>
         /// <param name="shared">If set to true, this storage location can be used by multiple clients at the same time. Note that this can not be used for the primary storage location and will require a sync interval.</param>
-        /// <param name="repairPercent">A percentage amount of repair data to be included, set to null to disable.</param>
+        /// <param name="enableRepairData">An option to enable or disable repair data.</param>
         /// <param name="tagFilters">Optional, only store items with tags starting with one of these tag filters.</param>
         public async Task AddStorageLocationAsync(IStorageLocation storageLocation, byte[] encryptionKey, int? syncInterval=null, int priority=1, bool shared=false, bool enableRepairData=false, string[]? tagFilters=null)
         {
@@ -70,9 +73,15 @@ namespace Comgenie.Storage
             await SyncFullAsync();
         }        
         
-        public void RemoveStorageLocation(IStorageLocation storageLocation)
+        /// <summary>
+        /// Remove a previously added storage location from this storage pool.
+        /// Note that this will trigger a full sync ignoring the sync intervals before removing this storage location.
+        /// </summary>
+        /// <param name="storageLocation">Previously added storage location</param>
+        public async Task RemoveStorageLocation(IStorageLocation storageLocation)
         {
-            // TODO: Sync this location first
+            // Do a full sync first
+            await SyncChangesAsync(true);
 
             lock (this)
             {
@@ -90,7 +99,13 @@ namespace Comgenie.Storage
             return string.Join("", hash.Take(16).Select(a => a.ToString("x2")));
         }
 
-        public async Task SyncChangesAsync(bool ignoreSyncInterval=false)
+        /// <summary>
+        /// Try to sync changes to all storage locations, optionally ignoring the sync interval and pushing the changes even if their sync interval isn't ellapsed yet.
+        /// Note that this call is already being executed by the StoragePool if there is more than one storage location.
+        /// </summary>
+        /// <param name="ignoreSyncInterval">Optional: Set to true to force a sync to all storage locations no matter what their sync interval is</param>
+        /// <returns>Task</returns>
+        internal async Task SyncChangesAsync(bool ignoreSyncInterval=false)
         {
             foreach (var locationInfo in LocationInfos)
             {
@@ -106,6 +121,7 @@ namespace Comgenie.Storage
                 locationInfo.LastSync = DateTime.UtcNow;
             }
         }
+
         private async Task SyncItem(StorageItem sourceItem, StorageLocationInfo targetLocationInfo, bool includeData=true)
         {
             if (sourceItem.StorageLocationInfo == null || sourceItem.StorageLocationInfo == targetLocationInfo)
@@ -228,6 +244,12 @@ namespace Comgenie.Storage
             return null;
         }
 
+        /// <summary>
+        /// Update all tags for a specific stored item, these tags will be synced across all added storage locations in this storage pool.
+        /// </summary>
+        /// <param name="itemId">Identifier of the storage item</param>
+        /// <param name="newTags">A new set of tags, previously added tags will be discarded</param>
+        /// <returns>Task</returns>
         public async Task UpdateTagsAsync(string itemId, string[] newTags)
         {
             var storageLocation = GetStorageLocationForItem(itemId, out StorageItem? item);
@@ -272,6 +294,12 @@ namespace Comgenie.Storage
             return false;
         }
 
+        /// <summary>
+        /// Rename the storage identifier for a specific stored item. This rename will be synced across all added storage locations in this storage pool.
+        /// </summary>
+        /// <param name="oldItemId">Existing storage identifier</param>
+        /// <param name="newItemId">New storage identifier</param>
+        /// <returns>Task returning true if the item is found and renamed</returns>
         public async Task<bool> RenameAsync(string oldItemId, string newItemId)
         {
             var storageLocation = GetStorageLocationForItem(oldItemId, out StorageItem? oldItem);
@@ -455,7 +483,12 @@ namespace Comgenie.Storage
             await storageLocation.SaveIndexAsync();
         }
 
-
+        /// <summary>
+        /// Get a storage item object for a stored item using its storage identifier.
+        /// The storage item contains all meta data for this stored item.
+        /// </summary>
+        /// <param name="itemId">Identifier of the stored item</param>
+        /// <returns>If found, a StorageItem object with all meta data</returns>
         public StorageItem? GetStorageItemById(string itemId)
         {
             StorageItem? item = null;
@@ -483,6 +516,10 @@ namespace Comgenie.Storage
             }
         }
 
+        /// <summary>
+        /// Give a queryable object to retrieve storage items from this storage pool.
+        /// </summary>
+        /// <returns>IQueryable for storage items</returns>
         public IQueryable<StorageItem> AsQueryable()
         {
             return new QueryTranslator<StorageItem>((string filter) =>
@@ -508,6 +545,9 @@ namespace Comgenie.Storage
             }
         }
 
+        /// <summary>
+        /// Sync all remaining changes and dispose all resources used by this storage pool.
+        /// </summary>
         public void Dispose()
         {
             // Note: Don't make this one async, as dispose is not automatically awaited

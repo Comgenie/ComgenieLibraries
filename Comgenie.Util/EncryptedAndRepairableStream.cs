@@ -16,6 +16,13 @@ namespace Comgenie.Utils
     /// </summary>
     public class EncryptedAndRepairableStream : Stream
     {
+        /// <summary>
+        /// Optional callback when disposing the stream, with a bool indicating if the stream was written to or not. 
+        /// This callback is useful in case the stream is passed away to another bit of code, but you still want to do any post actions on it.
+        /// </summary>
+        public Action<bool>? OnDispose { get; set; } // Custom callback when disposing, with a bool indicating if the stream was written to or not
+        private bool StreamWasWrittenTo { get; set; } = false;
+
         private Aes AesEncryption;
         private int RawBlockSize = 512;
         private int IVSize = 16;
@@ -42,8 +49,14 @@ namespace Comgenie.Utils
 
         private long RawPosition { get; set; } // position in the original unencrypted file
         private long RawLength { get; set; }
-        public Action<bool>? OnDispose { get; set; } // Custom callback when disposing, with a bool indicating if the stream was written to or not
-        private bool StreamWasWrittenTo { get; set; } = false;
+
+        /// <summary>
+        /// Create a new EncryptedAndRepairableStream. Encryption is mandatory, repair data is optional.
+        /// Note that re-opening any stream will require the same parameters.
+        /// </summary>
+        /// <param name="innerStream">Stream to encrypt and optionally add repair data</param>
+        /// <param name="encryptionKey">A strong encryption key, any length is accepted but longer is better</param>
+        /// <param name="includeRepairData">Optionally, option to include repair data. When reading a corrupted stream, the data is will be automatically repaired in the read buffer.</param>
         public EncryptedAndRepairableStream(Stream innerStream, byte[] encryptionKey, bool includeRepairData=false)
         {
             InnerStream = innerStream;
@@ -108,7 +121,6 @@ namespace Comgenie.Utils
              Repair data is calculated over everything after that
              Repair data format:  [Checksum * (DataShardCount+RepairDataCount] + [ Repair Shard ] + [ Repair Shard ] + .. + [ Another checksum block ]
          */
-
         private bool ReadBlockToBuffer()
         {
             if (InnerStream == null)
@@ -358,6 +370,10 @@ namespace Comgenie.Utils
             StreamWasWrittenTo = true;
         }
 
+        /// <summary>
+        /// Check and repair the full file. This will read the full file, detect issues and write it back repaired.
+        /// </summary>
+        /// <returns>The number of blocks repaired in this file</returns>
         public int Repair()
         {
             // Check and repair full file
