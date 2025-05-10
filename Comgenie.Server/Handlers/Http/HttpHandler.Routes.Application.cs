@@ -30,8 +30,7 @@ namespace Comgenie.Server.Handlers.Http
                     continue;
 
                 var methodParameters = method.GetParameters();
-
-                AddRoute(domain, path + (method.Name == "Index" ? "" : method.Name == "Other" ? "/*" : "/" + (lowerCaseMethods ? method.Name.ToLower() : method.Name)), new Route()
+                var route = new Route()
                 {
                     HandleExecuteRequestAsync = async (client, data) => {
                         if (data.RequestRaw == null)
@@ -248,6 +247,8 @@ namespace Comgenie.Server.Handlers.Http
                                 }
                                 else
                                     paramValues.Add(null); // Unsupported
+
+                                // TODO: Also support enums (both number as string)
                             }
                             else if (param.HasDefaultValue)
                                 paramValues.Add(param.DefaultValue);
@@ -285,7 +286,17 @@ namespace Comgenie.Server.Handlers.Http
                         }
                         return null;
                     }
-                });
+                };
+
+                if (method.Name == "Index")
+                    AddRoute(domain, path, route);
+                else if (method.Name == "Other")
+                    AddRoute(domain, path + "/*", route);
+                else
+                {
+                    AddRoute(domain, path + ("/" + (lowerCaseMethods ? method.Name.ToLower() : method.Name)), route);
+                    AddRoute(domain, path + ("/" + (lowerCaseMethods ? method.Name.ToLower() : method.Name)) + "/*", route);
+                }
             }
         }
     }
