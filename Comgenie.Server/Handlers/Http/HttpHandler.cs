@@ -470,7 +470,6 @@ namespace Comgenie.Server.Handlers.Http
             }
             else
             {
-
                 response.GZipResponse = false;
             }
 

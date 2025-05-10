@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Text;
@@ -10,6 +11,10 @@ using System.Threading.Tasks;
 
 namespace Comgenie.Server.Utils
 {
+    /// <summary>
+    /// This is a stand alone utility class to handle shared TCP connections. 
+    /// It can be used to do multiple http(s) requests to the same host, while keeping the connection open.
+    /// </summary>
     public class SharedTcpClient : IDisposable
     {
         private const bool Debug = false;
@@ -95,7 +100,7 @@ namespace Comgenie.Server.Utils
                     InUse = true,
                     LastActivity = DateTime.UtcNow,
                     Socket = socket,
-                    Stream = stream
+                    Stream = new RewindableStream(stream)
                 };
 
                 lock (ExistingConnectionsLockObj)
@@ -150,7 +155,7 @@ namespace Comgenie.Server.Utils
             public required int Port { get; set; }
             public required bool Ssl { get; set; }
             public required Socket Socket { get; set; }
-            public required Stream Stream { get; set; }
+            public required RewindableStream Stream { get; set; }
             public int CloseAfterSeconds { get; set; }
             public DateTime LastActivity { get; set; }
             public bool InUse { get; set; }
@@ -186,34 +191,25 @@ namespace Comgenie.Server.Utils
             private long CurrentDataPos { get; set; }
             private bool TransferEncodingChunked { get; set; }
             public bool IncludeChunkedHeadersInResponse { get; set; }
+
             public SingleHttpResponseStream(SharedTcpClient sharedTcpClient)
             {
                 Client = sharedTcpClient;
 
                 // Get response headers
-                var responseHeader = new StringBuilder();
                 Log.Debug(nameof(SingleHttpResponseStream), Client.CurrentInstanceNumber + " Start initial reading buffer");
-                while (responseHeader.Length < 1024 * 10) // Allow max 10 kb of response headers
-                {
-                    // TODO: Keep an internal buffer so we don't have to read bytes 1 at the time
-                    var x = sharedTcpClient.Connection.Stream.ReadByte();
-                    if (x == -1)
-                    {
-                        sharedTcpClient.Connection.Socket.Close();
-                        throw new Exception("Connection prematurely closed");
-                    }
-                    responseHeader.Append((char)x);
-                    if (x == '\n' && responseHeader.Length > 3 && responseHeader[responseHeader.Length - 2] == '\r' && responseHeader[responseHeader.Length - 3] == '\n' && responseHeader[responseHeader.Length - 4] == '\r')
-                        break;
-                }
 
-                if (responseHeader.Length >= 1024 * 10)
+                byte[] buffer = new byte[1024 * 10];
+                var headerLength = sharedTcpClient.Connection.Stream.ReadTillBytes(buffer, new byte[] { (byte)'\r', (byte)'\n', (byte)'\r', (byte)'\n' });
+                
+                if (headerLength <= 0)
                 {
                     sharedTcpClient.Connection.Socket.Close();
-                    throw new Exception("Invalid response in proxy request (too big)");
+                    throw new Exception("Invalid response in proxy request or connection prematurely closed");
                 }
+
                 Log.Debug(nameof(SingleHttpResponseStream), Client.CurrentInstanceNumber + " End initial reading buffer");
-                ResponseHeaders = responseHeader.ToString();
+                ResponseHeaders = Encoding.ASCII.GetString(buffer, 0, headerLength);
 
                 if (ResponseHeaders.Contains("Transfer-Encoding: chunked"))
                 {
@@ -262,78 +258,30 @@ namespace Comgenie.Server.Utils
             public override long Length => CurrentContentLength;
 
             public override long Position { get; set; }
-            private byte[]? ReadFirstBuffer = null;
-            private int ReadFirstBufferIndex = 0;
+            private bool CurrentContentEnded { get; set; } = false;
             public override int Read(byte[] buffer, int offset, int count)
             {
-                Log.Debug(nameof(SingleHttpResponseStream), Client.CurrentInstanceNumber + " Start reading");
-                if (ReadFirstBuffer != null)
-                {
-                    int curLen;
-                    if (count >= ReadFirstBuffer.Length - ReadFirstBufferIndex)
-                    {
-                        // Full
-                        curLen = ReadFirstBuffer.Length - ReadFirstBufferIndex;
-                        Buffer.BlockCopy(ReadFirstBuffer, ReadFirstBufferIndex, buffer, offset, ReadFirstBuffer.Length - ReadFirstBufferIndex);
-                    }
-                    else
-                    {
-                        // Partial
-                        Buffer.BlockCopy(ReadFirstBuffer, ReadFirstBufferIndex, buffer, offset, count);
-                        curLen = count;
-                    }
-
-                    ReadFirstBufferIndex += curLen;
-
-                    if (ReadFirstBufferIndex == ReadFirstBuffer.Length)
-                    {
-                        ReadFirstBuffer = null;
-                        ReadFirstBufferIndex = 0;
-                    }
-
-                    Log.Debug(nameof(SingleHttpResponseStream), Client.CurrentInstanceNumber + " Return partial buffer");
-                    return curLen;
-                }
+                Log.Debug(nameof(SingleHttpResponseStream), Client.CurrentInstanceNumber + " Start reading (Content length " + CurrentContentLength + ")");
 
                 if (CurrentContentLength == 0)
+                {
+                    Log.Debug(nameof(SingleHttpResponseStream), Client.CurrentInstanceNumber + " No more data, returned 0");
                     return 0;
+                }
 
                 if (CurrentContentLength < 0 && TransferEncodingChunked) // Read the first content length line (12AB\r\n) or any of the next content length lines (\r\n12AB\r\n)
                 {
-                    // TODO: Keep an internal buffer so we don't have to read bytes 1 at the time
-                    var contentLength = new StringBuilder();
-                    var fullBytes = new List<byte>();
-                    while (contentLength.Length < 100)
+                    byte[] contentLengthBuffer = new byte[100];
+
+                    var length = Client.Connection.Stream.ReadTillBytes(contentLengthBuffer, new byte[] { (byte)'\r', (byte)'\n' }, startingPos: 1);
+                    if (length == 0)
                     {
-                        var x = Client.Connection.Stream.ReadByte();
-                        if (x == -1)
-                        {
-                            Log.Warning(nameof(SingleHttpResponseStream), "Connection closed halfway during content");
-                            Client.Connection.Socket.Close();
-                            return 0;
-                        }
-                        contentLength.Append((char)x);
-                        fullBytes.Add((byte)x);
-                        if (x == '\n' && contentLength.Length > 1 && contentLength[contentLength.Length - 2] == '\r')
-                        {
-                            if (contentLength.Length == 2)
-                                contentLength.Clear();
-                            else
-                            {
-                                contentLength.Remove(contentLength.Length - 2, 2);
-                                break;
-                            }
-                        }
-                    }
-                    if (contentLength.Length == 100)
-                    {
-                        // Invalid content length line
                         Log.Warning(nameof(SingleHttpResponseStream), "Invalid content length line (1)");
                         Client.Connection.Socket.Close();
                         return 0;
                     }
 
-                    var contentLengthStr = contentLength.ToString();
+                    var contentLengthStr = Encoding.ASCII.GetString(contentLengthBuffer, 0, length).Trim('\r','\n');
                     long contentLengthLong = 0;
                     try
                     {
@@ -352,24 +300,31 @@ namespace Comgenie.Server.Utils
 
                     if (contentLengthLong == 0)
                     {
+                        Log.Debug(nameof(SingleHttpResponseStream), Client.CurrentInstanceNumber + " This content is ended");
+                        CurrentContentEnded = true;
                         // Content is might be ended, it might end with some trailing enters, but when there is a white-line, its actually ended
-                        for (var i = 0; i < 2; i++)
-                            fullBytes.Add((byte)Client.Connection.Stream.ReadByte());
-
-                        if (fullBytes[fullBytes.Count - 2] != '\r' && fullBytes[fullBytes.Count - 1] != '\n') // Not ended
+                        var a = Client.Connection.Stream.ReadByte();
+                        var b = Client.Connection.Stream.ReadByte();
+                        if (a < 0 || b < 0)
                         {
-                            Log.Info(nameof(SingleHttpResponseStream), "Actually not ended...");
+                            Log.Warning(nameof(SingleHttpResponseStream), "Invalid content length line (3)");
+                            Client.Connection.Socket.Close();
+                            return 0;
                         }
 
+                        if (a != '\r' || b != '\n')
+                            Log.Info(nameof(SingleHttpResponseStream), "Actually not ended...");
+                        length += 2;
+                        
                         if (!IncludeChunkedHeadersInResponse)
                             return 0;
                     }
 
                     if (IncludeChunkedHeadersInResponse)
                     {
-                        ReadFirstBuffer = fullBytes.ToArray();
-                        ReadFirstBufferIndex = 0;
-                        return Read(buffer, offset, count);
+                        Log.Debug(nameof(SingleHttpResponseStream), Client.CurrentInstanceNumber + " Rewinding stream by " + length + " bytes, current content length: " + CurrentContentLength);
+                        Client.Connection.Stream.Rewind(length);
+                        CurrentContentLength += length;
                     }
                 }
 
@@ -387,6 +342,8 @@ namespace Comgenie.Server.Utils
                     if (CurrentContentLength >= 0) // We did not expect this behaviour, so we will close the socket to make sure this connection won't be reused
                         Client.Connection.Socket.Close();
                     CurrentContentLength = 0;
+                    Log.Debug(nameof(SingleHttpResponseStream), Client.CurrentInstanceNumber + " Connection closed, returned 0");
+
                     return 0;
                 }
 
@@ -395,17 +352,20 @@ namespace Comgenie.Server.Utils
 
                 if (CurrentDataPos == CurrentContentLength) // End of current data reached
                 {
-                    if (TransferEncodingChunked)
+                    if (TransferEncodingChunked && !CurrentContentEnded)
                     {
                         // Next read call will retrieve length for next chunk
+                        Log.Debug(nameof(SingleHttpResponseStream), Client.CurrentInstanceNumber + " Not yet finished with request, so setting current content length to -1");
+                        CurrentContentEnded = false;
                         CurrentContentLength = -1;
                     }
                     else
                     {
+                        Log.Debug(nameof(SingleHttpResponseStream), Client.CurrentInstanceNumber + " Finished with request so setting current content length to 0, Chunked: " + TransferEncodingChunked);
                         CurrentContentLength = 0; // Set current content length to 0 to indicate we are fully finished handling this response
                     }
                 }
-                Log.Debug(nameof(SingleHttpResponseStream), Client.CurrentInstanceNumber + " End reading");
+                Log.Debug(nameof(SingleHttpResponseStream), Client.CurrentInstanceNumber + " End reading, returned " + len);
                 return len;
             }
 

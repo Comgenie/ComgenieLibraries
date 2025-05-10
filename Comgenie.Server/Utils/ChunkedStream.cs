@@ -8,6 +8,10 @@ using System.Threading.Tasks;
 
 namespace Comgenie.Server.Utils
 {
+    /// <summary>
+    /// This class is used to read a stream in chunks, and add chunked transfer encoding to the stream.
+    /// This can be used in cases where the content length is not yet known, but the server wants to start sending the data anyway.
+    /// </summary>
     public class ChunkedStream : Stream
     {
         public Stream InnerStream;
@@ -21,6 +25,12 @@ namespace Comgenie.Server.Utils
         private GZipStream? GZipStream = null;
         private MemoryStream? CompressedData = null;
         public static CompressionLevel CompressionLevel { get; set; } = CompressionLevel.Fastest;
+
+        /// <summary>
+        /// Creates a new chunked stream from the original stream. The original stream is disposed when this stream is closed/disposed.
+        /// </summary>
+        /// <param name="originalStream">Original stream to add chunked transfer encoding to</param>
+        /// <param name="enableGZipCompression">If set to true, GZip compression is applied to the chunks</param>
         public ChunkedStream(Stream originalStream, bool enableGZipCompression=false)
         {
             InnerStream = originalStream;

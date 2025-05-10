@@ -15,6 +15,10 @@ using System.Threading;
 
 namespace Comgenie.Server.Utils
 {
+    /// <summary>
+    /// LetsEncryptUtil is a utility class to generate and renew SSL certificates using LetsEncrypt.
+    /// This utility should be used with the Comgenie.Server and HttpHandler classes, as it will create temporary routes to verify domain ownership.
+    /// </summary>
     public class LetsEncryptUtil
     {
         private string LetsEncryptAPI { get; set; }
@@ -28,6 +32,15 @@ namespace Comgenie.Server.Utils
         private JsonSerializerOptions JsonSettings { get; set; }
         private string? Nonce { get; set; }
 
+        /// <summary>
+        /// Creates a new LetsEncryptUtil instance. This will create a new LetsEncrypt account key if it does not exist yet, or load the existing one from the file system.
+        /// Note that by using this utility, you are accepting the LetsEncrypt terms of service.
+        /// </summary>
+        /// <param name="server">Server instance with an httpHandler attached to it. This utility will use the pfx key set on the server instance to store the requested certificates.</param>
+        /// <param name="httpHandler">Http handler which will be used to register temporary routes on</param>
+        /// <param name="accountEmail">Email address which will be send to LetsEncrypt, including a flag that you've read and agreed to the LetsEncrypt terms of service.</param>
+        /// <param name="useStaging">Set to true to use the LetsEncrypt testing environment</param>
+        /// <exception cref="Exception">Throws an exception if the saved account settings file is corrupt</exception>
         public LetsEncryptUtil(Server server, HttpHandler httpHandler, string accountEmail, bool useStaging = false)
         {
             Http = httpHandler;
@@ -70,7 +83,9 @@ namespace Comgenie.Server.Utils
 
             SaveKeyFile();
         }
-
+        /// <summary>
+        /// Checks all domains currently registered within Server.Domains and renews the certificate if needed, automatically loads the certificate if it's updated.
+        /// </summary>
         public void CheckAndRenewAllServerDomains()
         {
             foreach (var domain in Server.Domains)
@@ -96,6 +111,15 @@ namespace Comgenie.Server.Utils
                 RSAKey = AccountKey.ExportCspBlob(true)
             }, JsonSettings));
         }
+
+        /// <summary>
+        /// Renews a specific domain certificate. If the certificate is still valid for at least 14 days, it will not be renewed unless force = true.
+        /// Note that it will also check if the domain with temporary route is accessible from the server itself before requesting the certificate.
+        /// </summary>
+        /// <param name="domain">Domain name to register the certificate for</param>
+        /// <param name="force">When set to true it will ignore the expiry date and renew a certificate even if it's still valid for more than 14 days.</param>
+        /// <returns>True if a new certificate was generated, False if the existing one is still fine</returns>
+        /// <exception cref="Exception">If the domain was not accessable from this server, or if the renew failed for any reason an exception will be thrown</exception>
         public bool GenerateCertificateForDomain(string domain, bool force = false)
         {
             if (!force && File.Exists(domain + ".pfx"))

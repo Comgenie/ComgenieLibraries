@@ -17,6 +17,9 @@ using System.Threading.Tasks;
 
 namespace Comgenie.Server.Utils
 {
+    /// <summary>
+    /// Utility to send dkim-signed emails directly to the receivers email server. 
+    /// </summary>
     public class SmtpUtil
     {
         private static Dictionary<string, RSACryptoServiceProvider?> DkimRsa = new Dictionary<string, RSACryptoServiceProvider?>();
@@ -104,6 +107,10 @@ namespace Comgenie.Server.Utils
             return sb.ToString();
         }
 
+        /// <summary>
+        /// Sign and send an MailMessage directly to the receivers mail server
+        /// </summary>
+        /// <param name="message">.NET MailMessage including a from, to, subject and body</param>
         public static void QueueSendMail(MailMessage message)
         {
             // TODO: Better queue system
