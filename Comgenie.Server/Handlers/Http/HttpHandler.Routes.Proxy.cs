@@ -69,6 +69,7 @@ namespace Comgenie.Server.Handlers.Http
                         }
                         request.AppendLine();
 
+                        
                         using (var responseStream = await SharedTcpClient.ExecuteHttpRequest(targetUrl, request.ToString(), data.DataStream))
                         {
                             var intercept = shouldInterceptHandler != null && interceptHandler != null && shouldInterceptHandler((data.Request, responseStream.ResponseHeaders));
@@ -89,11 +90,24 @@ namespace Comgenie.Server.Handlers.Http
                                 await client.SendString(responseStream.ResponseHeaders);
                                 await client.SendStream(responseStream, 0, -1);
                             }
+
+                            // TODO: For logging purposes also fill in some of the remaining HttpResponse fields based on the responseStream.ResponseHeaders
+                            var space = responseStream.ResponseHeaders.IndexOf(' ');
+                            var responseCode = 0;
+                            if (space > 0)
+                            {
+                                var secondSpace = responseStream.ResponseHeaders.IndexOf(' ', space + 1);
+                                if (secondSpace > 0)
+                                    int.TryParse(responseStream.ResponseHeaders.Substring(space + 1, secondSpace - (space + 1)), out responseCode);
+                            }
+
+                            return new HttpResponse()
+                            {
+                                StatusCode = responseCode,
+                                ResponseFinished = true,
+                            };
                         }
-                        return new HttpResponse()
-                        {
-                            ResponseFinished = true,
-                        };
+                        
                     }
                     catch (Exception e)
                     {

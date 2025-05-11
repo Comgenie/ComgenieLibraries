@@ -367,7 +367,14 @@ namespace Comgenie.Server.Handlers.Http
             }
 
             if (response?.ResponseFinished == true)
+            {
+                foreach (var processor in PostProcessors)
+                    processor(data, response);
+
+                Log.Info(nameof(HttpHandler), "Forwarded response: " + response.StatusCode);
+
                 return; // Remote connection proxy actually forwarded the full http response from the remote instance by now
+            }
 
             if (response == null)
             {
