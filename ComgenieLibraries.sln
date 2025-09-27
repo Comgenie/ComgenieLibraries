@@ -23,6 +23,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MailServerExample", "MailSe
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Comgenie.Util", "Comgenie.Util\Comgenie.Util.csproj", "{000CA4B4-61A3-469E-AA21-B93640D8F01D}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Comgenie.AI", "Comgenie.AI\Comgenie.AI.csproj", "{7B923F17-06C3-4EFA-A022-0462234AE3FF}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -53,6 +55,10 @@ Global
 		{000CA4B4-61A3-469E-AA21-B93640D8F01D}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{000CA4B4-61A3-469E-AA21-B93640D8F01D}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{000CA4B4-61A3-469E-AA21-B93640D8F01D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7B923F17-06C3-4EFA-A022-0462234AE3FF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7B923F17-06C3-4EFA-A022-0462234AE3FF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7B923F17-06C3-4EFA-A022-0462234AE3FF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7B923F17-06C3-4EFA-A022-0462234AE3FF}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

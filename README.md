@@ -45,3 +45,10 @@ Available as [nuget package](https://www.nuget.org/packages/Comgenie.Util/) .
 - ForwardStream to move data between two calls which don't provide any stream themselves but only consumes them.
 - SuperTree for a fast and memory efficient tag searcher, with wildcard support
 - QueryTranslator turns a linq-expression into a simple parsable text filter
+
+## Comgenie.AI
+A library with helpers for communicating with AI services like llama.cpp, OpenAI (Native and Azure).
+
+- Cost tracking
+- Request caching
+- Prompt LLM with a c# class structure and get a response as instance of that class
