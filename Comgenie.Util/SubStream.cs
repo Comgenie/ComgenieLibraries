@@ -16,14 +16,16 @@ namespace Comgenie.Utils
         public long CurLength = 0;
         public long CurOffset = 0;
         public long CurPosition = 0;
-        public SubStream(Stream originalStream, long offset, long length)
+        public bool IsDisposed = false;
+        public bool CloseInnerStreamAfterDispose = false;
+        public SubStream(Stream originalStream, long offset, long length, bool closeInnerStreamAfterDispose = false)
         {
             InnerStream = originalStream;
             CurLength = length;
             CurOffset = offset;
             originalStream.Position = offset;
             CurPosition = 0;
-            
+            CloseInnerStreamAfterDispose = closeInnerStreamAfterDispose;
         }
 
         public override bool CanRead => InnerStream.CanRead;
@@ -88,6 +90,14 @@ namespace Comgenie.Utils
             // TODO: Make sure this write action doesn't pass the substream boundary
             InnerStream.Write(buffer, offset, count);
             CurPosition += count;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            if (CloseInnerStreamAfterDispose)
+                InnerStream.Dispose();
+            IsDisposed = true;
         }
     }
 }
