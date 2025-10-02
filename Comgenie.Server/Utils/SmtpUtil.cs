@@ -431,12 +431,12 @@ namespace Comgenie.Server.Utils
                         ehlo = await ReadAll(reader, "250");
                     }
 
-                    await writer.WriteLineAsync("MAIL FROM: " + (mailFrom.Contains("<") ? mailFrom : "<" + mailFrom +">"));
+                    await writer.WriteLineAsync("MAIL FROM:" + (mailFrom.Contains("<") ? mailFrom : "<" + mailFrom +">"));
                     await ReadAll(reader, "250");
 
                     foreach (var to in rcptTo)
                     {
-                        await writer.WriteLineAsync("RCPT TO: " + (to.Contains("<") ? to : "<" + to + ">"));
+                        await writer.WriteLineAsync("RCPT TO:" + (to.Contains("<") ? to : "<" + to + ">"));
                         await ReadAll(reader, "250");
                     }
 
