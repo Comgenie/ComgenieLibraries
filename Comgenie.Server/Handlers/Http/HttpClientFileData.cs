@@ -1,4 +1,4 @@
-﻿using Comgenie.Utils;
+﻿using Comgenie.Util;
 using System;
 using System.Collections.Generic;
 using System.IO;

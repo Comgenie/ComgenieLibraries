@@ -1,13 +1,14 @@
-﻿using Comgenie.Utils.ReedSolomonNet;
+﻿using Comgenie.Util.ReedSolomonNet;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
 using System.Xml.Linq;
 
-namespace Comgenie.Utils
+namespace Comgenie.Util
 {
     /// <summary>
     /// This this a stream which saves the data to the inner stream encrypted and optionally repairable
@@ -24,7 +25,9 @@ namespace Comgenie.Utils
         private bool StreamWasWrittenTo { get; set; } = false;
 
         private Aes AesEncryption;
-        private int RawBlockSize = 512;
+
+        // Sizes of each field (some depends on the repair data setting in the constructor)
+        private int DataBlockSize = 512;
         private int IVSize = 16;
         private int LenFieldSize = 2;
         private int ChecksumSize = 4;
@@ -33,9 +36,10 @@ namespace Comgenie.Utils
         private int FullBlockSize = 0;
         private int HeaderSize = 0;
 
+        // We've hardcoded this one to be about 25% of repair data
         private int RepairShardDataCount = 6;
         private int RepairShardRepairCount = 2;
-        private Stream? InnerStream { get; set; } // stream of encrypted and repairable file
+        
 
         private byte[] RawBlockBuffer { get; set; }
         private byte[] FullBlockBuffer { get; set; }
@@ -44,11 +48,12 @@ namespace Comgenie.Utils
         private bool CurrentBlockBufferWritten { get; set; }
         private int CurrentBlockIndex { get; set; } = -1;
 
+        private Stream? InnerStream { get; set; } // stream of encrypted and repairable file
         private long InnerPosition { get; set; } // position in the actual encrypted and repairable file
         private long InnerLength { get; set; }
 
-        private long RawPosition { get; set; } // position in the original unencrypted file
-        private long RawLength { get; set; }
+        private long OuterPosition { get; set; } // position in the unencrypted data
+        private long OuterLength { get; set; }
 
         /// <summary>
         /// Create a new EncryptedAndRepairableStream. Encryption is mandatory, repair data is optional.
@@ -67,45 +72,123 @@ namespace Comgenie.Utils
 
             if (includeRepairData) // We will divide each data block into multiple shards, and generate additional parity shards
             {
-                RepairSize = RawBlockSize + IVSize + LenFieldSize;
+                RepairSize = DataBlockSize + IVSize + LenFieldSize;
                 if (RepairSize % RepairShardDataCount != 0)
                     RepairSize = RepairSize + (RepairShardDataCount - RepairSize % RepairShardDataCount);
                  
                 RepairChecksumSize = (ChecksumSize * (RepairShardDataCount + RepairShardRepairCount));
-                RepairSize = ((RawBlockSize / RepairShardDataCount) * RepairShardRepairCount) + RepairChecksumSize * 2;
+                RepairSize = ((DataBlockSize / RepairShardDataCount) * RepairShardRepairCount) + RepairChecksumSize * 2;
             }
 
             HeaderSize = LenFieldSize + IVSize + ChecksumSize + RepairSize;
-            FullBlockSize = HeaderSize + RawBlockSize;
+            FullBlockSize = HeaderSize + DataBlockSize;
 
             InnerPosition = innerStream.Position;
             InnerLength = innerStream.Length;
 
-            RawPosition = innerStream.Position; // TODO
+            // Get the full length
+            // TODO: Only do this in case the length is actually needed
+            OuterLength = (innerStream.Length / (long)FullBlockSize) * (long)DataBlockSize;
 
-            // TODO: We are now just estimating the length
-            RawLength = innerStream.Length / FullBlockSize * RawBlockSize;
             if (innerStream.Length % FullBlockSize > HeaderSize)
-                RawLength += innerStream.Length % FullBlockSize - HeaderSize;
+            {
+                // The last block may be less than the full size.
+                // However we have to look at the length field in the header to correctly know how many data bytes are actually in there
+                if (innerStream.CanSeek)
+                {
+                    var origPos = innerStream.Position;
+                    var totalBlocks = (innerStream.Length / (long)FullBlockSize); // This rounds it down to number of full blocks
+                    totalBlocks *= (long)FullBlockSize; // Back to the position of the inner stream of the final block
 
-            RawBlockBuffer = new byte[RawBlockSize];
+                    totalBlocks += ChecksumSize + RepairSize;
+                    innerStream.Seek(totalBlocks, SeekOrigin.Begin);
+                    byte[] number = new byte[2];
+                    innerStream.ReadExactly(number);
+
+                    var lastBlockActualLength = BitConverter.ToUInt16(number);
+
+                    OuterLength += lastBlockActualLength;
+
+                    innerStream.Seek(origPos, SeekOrigin.Begin);
+                }
+                else
+                {
+                    Debug.WriteLine("Warning: Estimating total length because the inner stream is not seekable", nameof(EncryptedAndRepairableStream));
+                    OuterLength += innerStream.Length % FullBlockSize - HeaderSize;
+                }
+            }
+
+            // Estimate the outer position based on the location within the inner position
+            if (innerStream.Length == innerStream.Position)
+            {
+                // Set to the end of the inner stream, we already have that one
+                OuterPosition = OuterLength;
+            }
+            else
+            {
+                long startBlock = (innerStream.Position / (long)FullBlockSize); // Rounds down based on full (written) block sizes
+                OuterPosition = startBlock * (long)DataBlockSize; // Convert to actual stored data block sizes.
+
+                if (innerStream.Position % FullBlockSize > HeaderSize)
+                {
+                    // Estimate
+                    Debug.WriteLine("Warning: A non-zero inner stream position may have unexpected results, unless set the end of the inner stream or in a multiple of " + FullBlockSize, nameof(EncryptedAndRepairableStream));
+                    OuterPosition += (innerStream.Position % FullBlockSize) - HeaderSize;
+                    if (OuterPosition > OuterLength)
+                        OuterPosition = OuterLength;
+                }
+                else if (innerStream.Position % FullBlockSize > 0)
+                {
+                    if (innerStream.CanSeek)
+                    {
+                        // Seek to the start of the full block
+                        innerStream.Seek(startBlock, SeekOrigin.Begin);
+                    }
+                    else
+                    {
+                        Debug.WriteLine("Warning: The inner stream position is not set to an exact boundary of a block and is not seekable.", nameof(EncryptedAndRepairableStream));
+                    }
+                }
+            }
+
+            RawBlockBuffer = new byte[DataBlockSize];
             FullBlockBuffer = new byte[FullBlockSize];
         }
 
+        /// <summary>
+        /// True if .Read() can be used for this stream
+        /// </summary>
         public override bool CanRead => InnerStream?.CanRead ?? false;
 
+        /// <summary>
+        /// True if .Seek() can be used for this stream
+        /// </summary>
         public override bool CanSeek => InnerStream?.CanSeek ?? false;
 
+        /// <summary>
+        /// True if .Write() can be used for this stream
+        /// </summary>
         public override bool CanWrite => InnerStream?.CanWrite ?? false;
 
-        public override long Length => RawLength;
+        /// <summary>
+        /// Length of this stream.
+        /// Note that this is the length of the unencrypted side of the data, not the actual file size length.
+        /// </summary>
+        public override long Length => OuterLength;
 
+        /// <summary>
+        /// Get or sets the position within this stream.
+        /// Note that this is the position within the unencrypted side of the data, not the actual position as written to a file.
+        /// </summary>
         public override long Position
         {
-            get { return RawPosition; }
-            set { RawPosition = value; }
+            get { return OuterPosition; }
+            set { Seek(value, SeekOrigin.Begin); }
         }
 
+        /// <summary>
+        /// Flush all pending (buffered) changes. This also calls .Flush() on the inner stream.
+        /// </summary>
         public override void Flush()
         {
             if (InnerStream == null)
@@ -250,7 +333,7 @@ namespace Comgenie.Utils
                 if (!reedSolomon.IsParityCorrect(shards, 0, shardSize))
                     throw new Exception("Could not repair data in file");
 
-                // Copy repaired data back                
+                // Copy repaired data back
                 remainingDataLen = corruptDataLength;
                 for (int i = 0; i < shards.Length - RepairShardRepairCount; i++)
                 {
@@ -280,19 +363,18 @@ namespace Comgenie.Utils
             // Set length to actual data contents, the encrypted data can be larger
             CurrentBlockLength = BitConverter.ToUInt16(FullBlockBuffer, ChecksumSize + RepairSize);
 
-            if (CurrentBlockLength < RawBlockSize) // last block, update the length to the exact number
-                RawLength = CurrentBlockIndex * RawBlockSize + CurrentBlockLength;
+            if (CurrentBlockLength < DataBlockSize) // last block, update the length to the exact number
+                OuterLength = CurrentBlockIndex * DataBlockSize + CurrentBlockLength;
 
             return repaired;
         }
-
 
         private void WriteBlockFromBuffer()
         {
             if (!CurrentBlockBufferWritten || InnerStream == null)
                 return;
 
-            var startBlockPos = FullBlockSize * CurrentBlockIndex;
+            var startBlockPos = (long)FullBlockSize * (long)CurrentBlockIndex;
             if (InnerPosition != startBlockPos)
             {
                 if (!InnerStream.CanSeek)
@@ -391,22 +473,29 @@ namespace Comgenie.Utils
                     WriteBlockFromBuffer();
                     repairedCount++;
                 }
-                if (CurrentBlockLength < RawBlockSize)
+                if (CurrentBlockLength < DataBlockSize)
                     return repairedCount;
                 CurrentBlockIndex++;
             }
         }
 
+        /// <summary>
+        /// Read a number of bytes to the given buffer at the given offset and for a max of the given count.
+        /// </summary>
+        /// <param name="buffer">A byte buffer which will be populated with data</param>
+        /// <param name="offset">The offset where the data population begins</param>
+        /// <param name="count">The max number of bytes which will be written to the buffer</param>
+        /// <returns>Number of actual bytes written to the buffer. 0 if no more data is available (end of stream).</returns>
         public override int Read(byte[] buffer, int offset, int count)
         {
             if (InnerStream == null)
                 return 0;
 
             int len = 0;
-            while (count > 0 && RawPosition < RawLength)
+            while (count > 0 && OuterPosition < OuterLength)
             {
-                var readInBlock = (int)(RawPosition / RawBlockSize);
-                var readInBlockPos = (int)(RawPosition % RawBlockSize);
+                var readInBlock = (int)(OuterPosition / DataBlockSize);
+                var readInBlockPos = (int)(OuterPosition % DataBlockSize);
                 if (readInBlock != CurrentBlockIndex)
                 {
                     WriteBlockFromBuffer(); // Write any previous cached block
@@ -415,26 +504,38 @@ namespace Comgenie.Utils
                     ReadBlockToBuffer();
                 }
 
-                var readLength = count < RawBlockSize - readInBlockPos ? count : RawBlockSize - readInBlockPos;
-                if (readLength + RawPosition > RawLength)
-                    readLength = (int)(RawLength - RawPosition);
+                var readLength = count < DataBlockSize - readInBlockPos ? count : DataBlockSize - readInBlockPos;
+                if (readLength + OuterPosition > OuterLength)
+                    readLength = (int)(OuterLength - OuterPosition);
                 Buffer.BlockCopy(RawBlockBuffer, readInBlockPos, buffer, offset, readLength);
 
                 len += readLength;
                 count -= readLength;
                 offset += readLength;
-                RawPosition += readLength;
+                OuterPosition += readLength;
             }
             return len;
         }
 
+        /// <summary>
+        /// Set the position in this stream. Note that this is the position within the unencrypted side of the data, not the actual position as written to a file.
+        /// </summary>
+        /// <param name="offset">Position in unencrypted data</param>
+        /// <param name="origin">Relative to</param>
+        /// <returns>The new position within this stream</returns>
         public override long Seek(long offset, SeekOrigin origin)
         {
             if (InnerStream == null)
                 return 0;
+
             // Calculate inner position
-            var writeInBlock = (int)(RawPosition / RawBlockSize);
-            var writeInBlockPos = (int)(RawPosition % RawBlockSize);
+            if (origin == SeekOrigin.End)
+                offset = OuterLength - offset;
+            else if (origin == SeekOrigin.Current)
+                offset = OuterPosition + offset;
+
+            var writeInBlock = (int)(offset / DataBlockSize);
+            var writeInBlockPos = (int)(offset % DataBlockSize);
 
             if (writeInBlock != CurrentBlockIndex)
             {
@@ -444,36 +545,48 @@ namespace Comgenie.Utils
                 ReadBlockToBuffer();
             }
 
-            RawPosition = offset;
-
+            OuterPosition = offset;
 
             InnerPosition = writeInBlock * FullBlockSize;
             InnerPosition += HeaderSize + writeInBlockPos;
 
-            return InnerStream.Seek(InnerPosition, origin);
+            InnerStream.Seek(InnerPosition, origin);
+
+            return OuterPosition;
         }
 
+        /// <summary>
+        /// Not supported yet
+        /// </summary>
+        /// <param name="value"></param>
         public override void SetLength(long value)
         {
+            throw new NotImplementedException();
             // TODO
             //InnerStream.SetLength(value);
         }
 
+        /// <summary>
+        /// Encrypt and write data to the inner stream. Note that an internal buffer is used and changes might not be written yet. 
+        /// </summary>
+        /// <param name="buffer">Byte array containing the data</param>
+        /// <param name="offset">Start position within the byte array to start reading data to be written</param>
+        /// <param name="count">Number of bytes starting at the offset to write.</param>
         public override void Write(byte[] buffer, int offset, int count)
         {
             if (InnerStream == null)
                 return;
             while (count > 0)
             {
-                var writeInBlock = (int)(RawPosition / RawBlockSize);
-                var writeInBlockPos = (int)(RawPosition % RawBlockSize);
+                var writeInBlock = (int)(OuterPosition / (long)DataBlockSize);
+                var writeInBlockPos = (int)(OuterPosition % (long)DataBlockSize);
 
                 if (writeInBlock != CurrentBlockIndex)
                 {
                     WriteBlockFromBuffer(); // Write any previous cached block
 
                     CurrentBlockIndex = writeInBlock;
-                    if (RawLength > RawPosition && (count < RawBlockSize || writeInBlockPos > 0)) // Partial overwriting, load current data
+                    if (OuterLength > OuterPosition && (count < DataBlockSize || writeInBlockPos > 0)) // Partial overwriting, load current data
                     {
                         ReadBlockToBuffer();
                     }
@@ -484,7 +597,7 @@ namespace Comgenie.Utils
                     }
                 }
 
-                var writeLength = count < RawBlockSize - writeInBlockPos ? count : RawBlockSize - writeInBlockPos;
+                var writeLength = count < DataBlockSize - writeInBlockPos ? count : DataBlockSize - writeInBlockPos;
                 Buffer.BlockCopy(buffer, offset, RawBlockBuffer, writeInBlockPos, writeLength);
                 CurrentBlockBufferWritten = true;
 
@@ -493,11 +606,16 @@ namespace Comgenie.Utils
 
                 count -= writeLength;
                 offset += writeLength;
-                RawPosition += writeLength;
-                if (RawLength < RawPosition)
-                    RawLength = RawPosition;
+                OuterPosition += writeLength;
+                if (OuterLength < OuterPosition)
+                    OuterLength = OuterPosition;
             }
         }
+
+        /// <summary>
+        /// Write away all pending changes and disposes this and the inner stream.
+        /// </summary>
+        /// <param name="disposing"></param>
         protected override void Dispose(bool disposing)
         {
             if (InnerStream == null)

@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Comgenie.Utils
+namespace Comgenie.Util
 {
     /// <summary>
     /// This ForwardStream class acts as a buffer when both the provider of the data, as the consumer of the data only accepts a stream and never provides a stream. 

@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Comgenie.Utils
+namespace Comgenie.Util
 {
     /// <summary>
     /// Use this CallbackStream to execute and action for each method executed on this stream object. The actions are always executed before the method itself is executed.

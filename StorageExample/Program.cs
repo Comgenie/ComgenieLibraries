@@ -1,7 +1,7 @@
 ﻿using Comgenie.Storage;
 using Comgenie.Storage.Entities;
 using Comgenie.Storage.Locations;
-using Comgenie.Utils;
+using Comgenie.Util;
 using System.Linq.Expressions;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -14,6 +14,7 @@ namespace StorageExample
         {
             // QueryTest();   Not fully implemented yet
 
+            ArchiveFileExample().Wait();
             EncryptedAndRepairableStreamExample();
             StoragePoolTest().Wait();
         }
@@ -159,6 +160,45 @@ namespace StorageExample
                 if (actualLineCount != testLineCount)
                     Console.WriteLine("Line count fail, " + testLineCount+" != " + actualLineCount);
             }
+        }
+
+        static async Task ArchiveFileExample()
+        {
+            var testMessage = "Test message added to the archive";
+
+            // Normal archive
+            if (File.Exists("TestArchive.index"))
+                File.Delete("TestArchive.index");
+            if (File.Exists("TestArchive.data"))
+                File.Delete("TestArchive.data");
+
+            var archive = new ArchiveFile("TestArchive");
+            await archive.WriteAllTextAsync("test.txt", testMessage);
+
+            await archive.WriteAllTextAsync("test-2.txt", "Another message added to the archive");
+
+            var data = await archive.ReadAllTextAsync("test.txt");
+            if (data != testMessage)
+                Console.WriteLine("Archive file fail");
+
+            // Encrypted and repairable archive
+            if (File.Exists("TestEncryptedArchive.index"))
+                File.Delete("TestEncryptedArchive.index");
+            if (File.Exists("TestEncryptedArchive.data"))
+                File.Delete("TestEncryptedArchive.data");
+
+            var encryptedArchive = new EncryptedRepairableAndCompressedArchiveFile("TestEncryptedArchive", ASCIIEncoding.UTF8.GetBytes("encryption key"), true, false);
+            await encryptedArchive.WriteAllTextAsync("test.txt", testMessage);
+
+            for (var i = 0; i < 100; i++)
+            {
+                await encryptedArchive.WriteAllTextAsync("test-"+i+".txt", "Another message added to the archive");
+            }
+
+            var data2 = await encryptedArchive.ReadAllTextAsync("test.txt");
+            if (data2 != testMessage)
+                Console.WriteLine("Archive file fail");
+
         }
     }
 }

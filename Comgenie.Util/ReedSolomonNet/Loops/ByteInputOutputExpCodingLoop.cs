@@ -4,7 +4,7 @@
 
 using System;
 
-namespace Comgenie.Utils.ReedSolomonNet.Loops
+namespace Comgenie.Util.ReedSolomonNet.Loops
 {
     /// <summary>
     /// One specific ordering/nesting of the coding loops.

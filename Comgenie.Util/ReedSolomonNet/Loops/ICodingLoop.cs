@@ -1,7 +1,7 @@
 ﻿// Copyright © 2022 Kodjo Laurent Egbakou
 // Copyright 2015, Backblaze, Inc.  All rights reserved.
 
-namespace Comgenie.Utils.ReedSolomonNet.Loops
+namespace Comgenie.Util.ReedSolomonNet.Loops
 {
     /// <summary>
     /// Interface for a method of looping over inputs and encoding them.

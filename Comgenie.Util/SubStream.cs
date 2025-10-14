@@ -5,7 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Comgenie.Utils
+namespace Comgenie.Util
 {
     /// <summary>
     /// Stream object which can be used to pass a smaller section of a large stream.

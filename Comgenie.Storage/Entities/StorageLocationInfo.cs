@@ -1,5 +1,5 @@
 ﻿using Comgenie.Storage.Locations;
-using Comgenie.Utils;
+using Comgenie.Util;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -178,14 +178,24 @@ namespace Comgenie.Storage.Entities
 
             lock (Index)
             {
-                Index.LastModified = DateTime.UtcNow;
-                using (var file = Location.OpenFile("index.cmg", FileMode.Create, FileAccess.Write))
-                {
-                    if (file == null)
-                        throw new Exception("Could not create index file");
+                // We'll save it to seperate files.
+                // - The main index.cmg one, this is the one we'll use when loading this data
+                // - A backup one in case the index-cmg couldn't be written to for some reason and gets corrupted, we'll keep a version per month in case something major happened
+                var saveAsFileName = new string[] { "index.cmg", $"index-backup-{DateTime.UtcNow:yyyyMM}.cmg" };
 
-                    using (var encStream = new EncryptedAndRepairableStream(file, EncryptionKey, EnableRepairData))
-                        JsonSerializer.SerializeAsync(encStream, Index).Wait();
+                foreach (var fileName in saveAsFileName)
+                {
+                    Index.LastModified = DateTime.UtcNow;
+                    using (var file = Location.OpenFile(fileName, FileMode.Create, FileAccess.Write))
+                    {
+                        if (file == null)
+                            throw new Exception("Could not create index file");
+
+                        // TODO: Save in a different data structure suitable for handling partial updates
+
+                        using (var encStream = new EncryptedAndRepairableStream(file, EncryptionKey, EnableRepairData))
+                            JsonSerializer.SerializeAsync(encStream, Index).Wait();
+                    }
                 }
             }
 

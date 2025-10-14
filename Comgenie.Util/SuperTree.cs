@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Comgenie.Utils
+namespace Comgenie.Util
 {
     /// <summary>
     /// Fast and hopefully memory efficient memory tree to quickly find items using filters.

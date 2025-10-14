@@ -5,7 +5,7 @@
 using System;
 using System.Linq;
 
-namespace Comgenie.Utils.ReedSolomonNet
+namespace Comgenie.Util.ReedSolomonNet
 {
     /// <summary>
     /// 8-bit Galois Field

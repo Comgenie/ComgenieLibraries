@@ -1,8 +1,10 @@
-﻿using Comgenie.Utils;
+﻿using Comgenie.Util;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
+using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Security.Cryptography;
@@ -11,6 +13,10 @@ using System.Threading.Tasks;
 
 namespace Comgenie.Util
 {
+    /// <summary>
+    /// Simple archive data+index file. This is an append only archive storing all names and positions in an index file.
+    /// If an item with the same name is added twice, reading it will always read the last added version.
+    /// </summary>
     public class ArchiveFile
     {
         private static ConcurrentDictionary<string, ArchiveFile> SharedInstances { get; set; } = new();
@@ -20,7 +26,7 @@ namespace Comgenie.Util
                 SharedInstances[archiveName] = new ArchiveFile(archiveName);
             return SharedInstances[archiveName];
         }
-
+        private bool ArchiveFileLoaded { get; set; } = false;
         private string IndexFileName { get; set; }
         private string DataFileName { get; set; }
 
@@ -30,6 +36,11 @@ namespace Comgenie.Util
         {
             IndexFileName = archiveName + ".index";
             DataFileName = archiveName + ".data";
+        }
+        private async Task OpenArchiveFile()
+        {
+            if (ArchiveFileLoaded)
+                return;
 
             var indexFileExists = File.Exists(IndexFileName);
             var dataFileExists = File.Exists(DataFileName);
@@ -42,7 +53,7 @@ namespace Comgenie.Util
 
             if (indexFileExists)
             {
-                using (var file = File.OpenRead(archiveName + ".index"))
+                using (var file = await OpenFileRetry(IndexFileName, FileMode.Open, FileAccess.Read, FileShare.Read))
                 using (var reader = new BinaryReader(file))
                 {
                     try
@@ -64,15 +75,20 @@ namespace Comgenie.Util
                     }
                 }
             }
+            ArchiveFileLoaded = true;
         }
         public bool Exists(string entryName)
         {
+            OpenArchiveFile().Wait();
             return Entries.ContainsKey(entryName);
         }
+
         private List<SubStream> Streams = new();
         private SemaphoreSlim Semmie = new SemaphoreSlim(1);
         public async Task<Stream?> Open(string entryName)
         {
+            await OpenArchiveFile();
+
             if (!Entries.ContainsKey(entryName))
                 return null;
 
@@ -87,7 +103,7 @@ namespace Comgenie.Util
             }
 
             var entry = Entries[entryName];
-            var file = File.Open(DataFileName, FileMode.Open, FileAccess.Read, FileShare.Read);
+            var file = await OpenFileRetry(DataFileName, FileMode.Open, FileAccess.Read, FileShare.Read);
             var subStream = new SubStream(file, entry.start, entry.size, true);
             Streams.Add(subStream);
 
@@ -97,6 +113,8 @@ namespace Comgenie.Util
         }
         public async Task Add(string entryName, Stream data)
         {
+            await OpenArchiveFile();
+
             var buffer = new byte[1024 * 128];
 
             await Semmie.WaitAsync();
@@ -115,7 +133,7 @@ namespace Comgenie.Util
             (long start, long size) newEntry = new();
 
             // Append data
-            using (var file = await OpenFileRetry(DataFileName, FileMode.Append, FileAccess.Write))
+            using (var file = await OpenFileRetry(DataFileName, FileMode.Append, FileAccess.Write, FileShare.None))
             {
                 newEntry.start = file.Position;
                 while (true)
@@ -131,30 +149,26 @@ namespace Comgenie.Util
             }
 
             // Append index file
-            using (var file = await OpenFileRetry(IndexFileName, FileMode.Append, FileAccess.Write))
+            using (var file = await OpenFileRetry(IndexFileName, FileMode.Append, FileAccess.Write, FileShare.None))
             using (var writer = new BinaryWriter(file))
             {
-                
                 writer.Write(entryName);
                 writer.Write(newEntry.start);
                 writer.Write(newEntry.size);
-                //Console.WriteLine("After write entry");
             }
 
-            //Console.WriteLine("Finished write entry");
-
             Entries[entryName] = newEntry;
-
-            //Console.WriteLine("Release lock");
             Semmie.Release();
         }
-        private static async Task<FileStream> OpenFileRetry(string path, FileMode mode, FileAccess access)
+        internal virtual Stream OpenFile(string path, FileMode mode, FileAccess access, FileShare share)
+            => File.Open(path, mode, access, share);
+        internal async Task<Stream> OpenFileRetry(string path, FileMode mode, FileAccess access, FileShare share)
         {
             while (true)
             {
                 try
                 {
-                    return File.Open(path, mode, access);
+                    return this.OpenFile(path, mode, access, share);
                 }
                 catch (IOException ex)
                 {
@@ -197,6 +211,50 @@ namespace Comgenie.Util
                     builder.Append(bytes[i].ToString("x2"));
                 return builder.ToString();
             }
+        }
+    }
+
+    /// <summary>
+    /// An encrypted and repairable version of the archive file
+    /// </summary>
+    public class EncryptedRepairableAndCompressedArchiveFile : ArchiveFile
+    {
+        internal byte[] EncryptionKey { get; set; }
+        internal bool IncludeRepairData { get; set; }
+        internal bool EnableCompression { get; set; }
+        public EncryptedRepairableAndCompressedArchiveFile(string archiveName, byte[] encryptionKey, bool includeRepairData, bool enableCompression) : base(archiveName)
+        {
+            EncryptionKey = encryptionKey;
+            IncludeRepairData = includeRepairData;
+            EnableCompression = enableCompression;
+        }
+
+        internal override Stream OpenFile(string path, FileMode mode, FileAccess access, FileShare share)
+        {
+            Stream stream;
+            bool seekToEnd = false;
+            if (mode == FileMode.Append)
+            {
+                // The encryptable stream needs seek-support
+                stream = base.OpenFile(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, share);
+                seekToEnd = true;
+            }
+            else
+            {
+                stream = base.OpenFile(path, mode, access, share);
+            }
+
+            if (EnableCompression)
+            {
+                stream = new GZipStream(stream, access == FileAccess.Read ? CompressionMode.Decompress : CompressionMode.Compress, false);
+            }
+
+            stream = new EncryptedAndRepairableStream(stream, EncryptionKey, IncludeRepairData);
+
+            if (seekToEnd)
+                stream.Position = stream.Length;
+
+            return stream;
         }
     }
 }

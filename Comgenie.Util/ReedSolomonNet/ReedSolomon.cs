@@ -3,9 +3,9 @@
 // Copyright 2015, Backblaze, Inc.  All rights reserved.
 
 using System;
-using Comgenie.Utils.ReedSolomonNet.Loops;
+using Comgenie.Util.ReedSolomonNet.Loops;
 
-namespace Comgenie.Utils.ReedSolomonNet
+namespace Comgenie.Util.ReedSolomonNet
 {
     /// <summary>
     /// Reed-Solomon Coding over 8-bit values.

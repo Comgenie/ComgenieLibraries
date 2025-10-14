@@ -1,4 +1,4 @@
-﻿using Comgenie.Utils;
+﻿using Comgenie.Util;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -148,7 +148,7 @@ namespace Comgenie.Storage.Locations
 
                     var response = httpClient.SendAsync(request).Result;
                     if (!response.IsSuccessStatusCode)
-                        return null;
+                        return null; // TODO: Handle difference between a not found and a server/connection error
 
                     return response.Content.ReadAsStream();
                 }

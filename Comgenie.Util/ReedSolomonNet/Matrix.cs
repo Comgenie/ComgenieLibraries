@@ -6,7 +6,7 @@ using System;
 using System.Linq;
 using System.Text;
 
-namespace Comgenie.Utils.ReedSolomonNet
+namespace Comgenie.Util.ReedSolomonNet
 {
     /// <summary>
     /// A matrix over the 8-bit Galois field.
