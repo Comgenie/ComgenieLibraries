@@ -210,7 +210,7 @@ namespace Comgenie.Util
                 return false;
 
             bool repaired = false;
-            var startBlockPos = FullBlockSize * CurrentBlockIndex;
+            var startBlockPos = (long)FullBlockSize * (long)CurrentBlockIndex;
             if (InnerLength < startBlockPos)
             {
                 CurrentBlockLength = 0;
@@ -364,7 +364,7 @@ namespace Comgenie.Util
             CurrentBlockLength = BitConverter.ToUInt16(FullBlockBuffer, ChecksumSize + RepairSize);
 
             if (CurrentBlockLength < DataBlockSize) // last block, update the length to the exact number
-                OuterLength = CurrentBlockIndex * DataBlockSize + CurrentBlockLength;
+                OuterLength = ((long)CurrentBlockIndex * (long)DataBlockSize) + (long)CurrentBlockLength;
 
             return repaired;
         }
@@ -547,7 +547,7 @@ namespace Comgenie.Util
 
             OuterPosition = offset;
 
-            InnerPosition = writeInBlock * FullBlockSize;
+            InnerPosition = (long)writeInBlock * (long)FullBlockSize;
             InnerPosition += HeaderSize + writeInBlockPos;
 
             InnerStream.Seek(InnerPosition, origin);
