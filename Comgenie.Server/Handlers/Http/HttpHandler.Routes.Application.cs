@@ -86,7 +86,7 @@ namespace Comgenie.Server.Handlers.Http
                                 {
                                     data.DataStream.Position = curDataPos;
 
-                                    /// Find the boundary 
+                                    // Find the boundary 
                                     var found = true;
                                     for (var j = 0; j < boundaryBytes.Length; j++)
                                     {

@@ -12,6 +12,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace Comgenie.Server.Utils
 {
@@ -86,13 +87,21 @@ namespace Comgenie.Server.Utils
         /// <summary>
         /// Checks all domains currently registered within Server.Domains and renews the certificate if needed, automatically loads the certificate if it's updated.
         /// </summary>
-        public void CheckAndRenewAllServerDomains()
+        public void CheckAndRenewAllServerDomains() // non-async version for backwards compatibility
+        {
+            CheckAndRenewAllServerDomainsAsync().Wait();
+        }
+
+        /// <summary>
+        /// Checks all domains currently registered within Server.Domains and renews the certificate if needed, automatically loads the certificate if it's updated.
+        /// </summary>
+        public async Task CheckAndRenewAllServerDomainsAsync()
         {
             foreach (var domain in Server.Domains)
             {
                 try
                 {
-                    if (GenerateCertificateForDomain(domain))
+                    if (await GenerateCertificateForDomain(domain))
                         Server.AddDomain(domain); // Adding it again reloads the certificate
                 }
                 catch (Exception e)
@@ -101,10 +110,11 @@ namespace Comgenie.Server.Utils
                 }
             }
         }
+
         private void SaveKeyFile()
         {
             var keyFile = AccountSettingsFile;
-            File.WriteAllText(keyFile, JsonSerializer.Serialize(new AccountSettings()
+            File.WriteAllTextAsync(keyFile, JsonSerializer.Serialize(new AccountSettings()
             {
                 Email = AccountEmail,
                 KeyId = AccountKeyId,
@@ -120,7 +130,7 @@ namespace Comgenie.Server.Utils
         /// <param name="force">When set to true it will ignore the expiry date and renew a certificate even if it's still valid for more than 14 days.</param>
         /// <returns>True if a new certificate was generated, False if the existing one is still fine</returns>
         /// <exception cref="Exception">If the domain was not accessable from this server, or if the renew failed for any reason an exception will be thrown</exception>
-        public bool GenerateCertificateForDomain(string domain, bool force = false)
+        public async Task<bool> GenerateCertificateForDomain(string domain, bool force = false)
         {
             if (!force && File.Exists(domain + ".pfx"))
             {
@@ -137,7 +147,7 @@ namespace Comgenie.Server.Utils
             byte[] verifyDomainAccessData = new byte[] { 42 };
             Http.AddContentRoute(domain, tempVerifyPage, verifyDomainAccessData, "text/plain");
 
-            if (!CheckConnection("http://" + domain + "/" + tempVerifyPage, verifyDomainAccessData))
+            if (!await CheckConnectionAsync("http://" + domain + "/" + tempVerifyPage, verifyDomainAccessData))
             {
                 Http.RemoveRoute(domain, tempVerifyPage);
                 throw new Exception("Could not verify access to the domain");
@@ -147,12 +157,12 @@ namespace Comgenie.Server.Utils
 
 
             // Get nonce (needed for the Jws messages)
-            if (!GetNonce() || Nonce == null)
+            if (!await GetNonceAsync() || Nonce == null)
                 throw new Exception("Could not retrieve nonce");
 
             // Create or verify LetsEncrypt account
             // POST /acme/new-account   (Return 200 for existing account, 201 for new account created), The Location: header in the response will be used as KeyId in the Jwk messages
-            var response = JwsRequest(LetsEncryptAPI + "/new-acct", new
+            var response = await JwsRequestSimpleAsync(LetsEncryptAPI + "/new-acct", new
             {
                 contact = new string[] { "mailto:" + AccountEmail },
                 termsOfServiceAgreed = true
@@ -188,16 +198,17 @@ namespace Comgenie.Server.Utils
 
             // Order certificate for domain /acme/new-order
             string? orderUrl;
-            response = JwsRequest(LetsEncryptAPI + "/new-order", new
+            var responseWithLocation = await JwsRequestAsync(LetsEncryptAPI + "/new-order", new
             {
                 identifiers = new object[] {
                     new { type = "dns", value = domain }
                 },
                 //notBefore = DateTime.UtcNow.AddDays(-1).ToString("o"), // The requested value of the notBefore field in the certificate
                 //notAfter = DateTime.UtcNow.AddDays(60).ToString("o") // The requested value of the notAfter field in the certificate 
-            }, out orderUrl);
+            });
+            response = responseWithLocation.jsonObj;
 
-            if (orderUrl == null)
+            if (responseWithLocation.location == null)
                 throw new Exception("Missing order url in letsencrypt response");
 
             // We will get a string[] back ( authorizations ), containing urls ( /acme/authz/<Identifier> ) to retrieve our challenges
@@ -222,7 +233,7 @@ namespace Comgenie.Server.Utils
                 foreach (var authUrl in authUrls)
                 {
                     // - request each Identifier Authorization challenge at:  /acme/authz/<Identifier>
-                    response = JwsRequest(authUrl, null);
+                    response = await JwsRequestSimpleAsync(authUrl, null);
                     if (response == null)
                         continue;
 
@@ -251,7 +262,7 @@ namespace Comgenie.Server.Utils
                         Http.AddContentRoute(domain, "/.well-known/acme-challenge/" + challengeToken, fileContents, "application/octet-stream");
 
                         // - Test it ourself first
-                        if (!CheckConnection("http://" + domain + "/.well-known/acme-challenge/" + challengeToken, fileContents))
+                        if (!await CheckConnectionAsync("http://" + domain + "/.well-known/acme-challenge/" + challengeToken, fileContents))
                         {
                             Http.RemoveRoute(domain, "/.well-known/acme-challenge/" + challengeToken);
                             throw new Exception("Could not verify challenge url");
@@ -260,7 +271,7 @@ namespace Comgenie.Server.Utils
                         // - Call url with an empty {} payload to instruct the server to try ( /acme/chall/<Identifier> ) 
                         while (true)
                         {
-                            var responseVerify = JwsRequest(challengeVerifyUrl, new { });
+                            var responseVerify = await JwsRequestSimpleAsync(challengeVerifyUrl, new { });
                             if (responseVerify == null)
                             {
                                 Thread.Sleep(5 * 1000); // Retry in 5 sec
@@ -287,7 +298,7 @@ namespace Comgenie.Server.Utils
 
                 // Call finalize step with our CSR     
             }
-            response = JwsRequest(finalizeUrl, new
+            response = await JwsRequestSimpleAsync(finalizeUrl, new
             {
                 csr = CSR,
             });
@@ -301,7 +312,7 @@ namespace Comgenie.Server.Utils
             while (response["status"]!.ToString() == "processing")
             {
                 Thread.Sleep(5 * 1000);
-                response = JwsRequest(orderUrl, null);
+                response = await JwsRequestSimpleAsync(responseWithLocation.location, null);
                 if (response == null || response["status"] == null)
                     throw new Exception("Did not get a valid JwsRequest response");
             }            
@@ -316,22 +327,22 @@ namespace Comgenie.Server.Utils
             // Download certificate /acme/cert/<Identifier> 
             // Accept: application/pem-certificate-chain
             var certUrl = response["certificate"]!.ToString();
-            var pemCertificateData = JwsRequestBytes(certUrl, null, out _);
+            var pemCertificateData = await JwsRequestBytesAsync(certUrl, null);
                 
             // Combine cert with certificateRequest and export an .pfx
-            var cert = X509CertificateLoader.LoadCertificate(pemCertificateData);
+            var cert = X509CertificateLoader.LoadCertificate(pemCertificateData.bytes);
             cert = cert.CopyWithPrivateKey(certificateKey);
             File.WriteAllBytes(domain + ".pfx", cert.Export(X509ContentType.Pkcs12, Server.GetPfxKey()));                
             
             return true; // return true if we have a new certificate (this is used to instruct the Server to pick it up)
         }
-        private bool CheckConnection(string url, byte[] contentVerify)
+        private async Task<bool> CheckConnectionAsync(string url, byte[] contentVerify)
         {
             try
             {
                 using (var client = new HttpClient())
                 {
-                    var data = client.GetByteArrayAsync(url).Result;
+                    var data = await client.GetByteArrayAsync(url);
                     if (data == null || data.Length != contentVerify.Length) // todo: compare contents
                         return false;
                     return true;
@@ -340,12 +351,12 @@ namespace Comgenie.Server.Utils
             catch {}
             return false;
         }
-        private bool GetNonce()
+        private async Task<bool> GetNonceAsync()
         {
             // HEAD /acme/new-nonce HTTP/1.1
             using (var client = new HttpClient())
             {
-                var response = client.GetAsync(LetsEncryptAPI + "/new-nonce").Result;
+                var response = await client.GetAsync(LetsEncryptAPI + "/new-nonce");
                 if (response.Headers.Contains("Replay-Nonce") && response.Headers.GetValues("Replay-Nonce").Count() > 0)
                 {
                     Nonce = response.Headers.GetValues("Replay-Nonce").First();
@@ -354,17 +365,20 @@ namespace Comgenie.Server.Utils
             }
             return false;            
         }
-        private JsonObject? JwsRequest(string url, object? payload)
+        private async Task<JsonObject?> JwsRequestSimpleAsync(string url, object? payload)
         {
-            return JwsRequest(url, payload, out _);
+            var response = await JwsRequestAsync(url, payload);
+            return response.jsonObj;
         }
-        private JsonObject? JwsRequest(string url, object? payload, out string? location)
+        private async Task<(JsonObject? jsonObj, string? location)> JwsRequestAsync(string url, object? payload)
         {
-            return JsonObject.Parse(ASCIIEncoding.UTF8.GetString(JwsRequestBytes(url, payload, out location)))?.AsObject();
+            var response = await JwsRequestBytesAsync(url, payload);
+            var jsonObj = JsonObject.Parse(ASCIIEncoding.UTF8.GetString(response.bytes))?.AsObject();
+            return (jsonObj, response.location);
         }
-        private byte[] JwsRequestBytes(string url, object? payload, out string? location)
+        private async Task<(byte[] bytes, string? location)> JwsRequestBytesAsync(string url, object? payload)
         {
-            location = null;
+            string? location = null;
             var JwkRequired = url.Contains("new-acct") || url.Contains("revoke");
             var CertDownload = url.Contains("/cert/");
 
@@ -398,9 +412,9 @@ namespace Comgenie.Server.Utils
 
                     // Override the content type as LetsEncrypt does not like the charset to be included
                     content.Headers.ContentType = new MediaTypeHeaderValue("application/jose+json");
-                    var response = client.PostAsync(url, content).Result;
+                    var response = await client.PostAsync(url, content);
 
-                    using (var dataStream = response.Content.ReadAsStream())
+                    using (var dataStream = await response.Content.ReadAsStreamAsync())
                     {
                         if (response.Headers.Contains("Replay-Nonce"))
                             Nonce = response.Headers.GetValues("Replay-Nonce").First();
@@ -416,8 +430,8 @@ namespace Comgenie.Server.Utils
 
                         using (var ms = new MemoryStream())
                         {
-                            dataStream.CopyTo(ms);
-                            return ms.ToArray();
+                            await dataStream.CopyToAsync(ms);
+                            return (ms.ToArray(), location);
                         }
                     }
                 }
