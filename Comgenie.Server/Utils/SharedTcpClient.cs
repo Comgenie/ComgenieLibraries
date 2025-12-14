@@ -5,6 +5,7 @@ using System.Linq;
 using System.Linq.Expressions;
 using System.Net.Security;
 using System.Net.Sockets;
+using System.Security.AccessControl;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -76,11 +77,25 @@ namespace Comgenie.Server.Utils
 
             // Create a new connection
             Log.Debug(nameof(SharedTcpClient), CurrentInstanceNumber + " Create socket");
-            var socket = new Socket(SocketType.Stream, ProtocolType.Tcp);
+            var socket = port == 0 ? 
+                new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified) :
+                new Socket(SocketType.Stream, ProtocolType.Tcp);
+
             try
             {
                 Log.Debug(nameof(SharedTcpClient), CurrentInstanceNumber + " Before connect");
-                socket.Connect(host, port);
+
+                if (port == 0)
+                {   // Assuming unix domain socket
+                    var socketPath = host.Contains("/") || host.Contains("\\") ?
+                        host : // Path was provided
+                        Path.Combine(Path.GetTempPath(), host); // Default to temp path
+
+                    socket.Connect(new UnixDomainSocketEndPoint(socketPath));
+                }
+                else
+                    socket.Connect(host, port);
+                
                 Log.Debug(nameof(SharedTcpClient), CurrentInstanceNumber + " After connect");
                 Stream stream = new NetworkStream(socket, true);
                 if (ssl)
@@ -168,9 +183,23 @@ namespace Comgenie.Server.Utils
         // Execute http request and returns a stream with the full response
         public static async Task<SingleHttpResponseStream> ExecuteHttpRequest(string url, string requestHeaders, Stream? requestContent)
         {
+            
             var uri = new Uri(url);
             Log.Debug(nameof(SharedTcpClient), "Get shared client for " + uri.Host);
-            var client = new SharedTcpClient(uri.Host, uri.Port, uri.Port == 443);
+            SharedTcpClient client;
+            if (uri.Scheme == "uds") // Unix Domain Sockets:  uds://(Encoded socket file path)/actual url
+            {
+                string socketPath = System.Net.WebUtility.UrlDecode(uri.Host); // "/tmp/my.sock"
+
+                Log.Debug(nameof(SharedTcpClient), "Connecting to unix domain socket path: " + socketPath);
+                client = new SharedTcpClient(socketPath, 0, false);
+            }
+            else
+            {
+                client = new SharedTcpClient(uri.Host, uri.Port, uri.Port == 443);
+            }
+            
+            
             client.Connection.CanReuse = false;
             Log.Debug(nameof(SharedTcpClient), "Send headers");
             await client.Connection.Stream.WriteAsync(Encoding.ASCII.GetBytes(requestHeaders));

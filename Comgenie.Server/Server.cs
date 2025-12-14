@@ -12,6 +12,7 @@ using System.Net.Security;
 using System.Net.Sockets;
 using System.Reflection.Metadata.Ecma335;
 using System.Runtime.CompilerServices;
+using System.Runtime.Intrinsics.X86;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -144,11 +145,30 @@ namespace Comgenie.Server
             listenSocket.Listen(1024);
 
             Handlers.Add(listenSocket, new ServerProtocol(handler, port, ssl, (handler is SmtpHandler || handler is ImapHandler)));
+            StartAcceptThread(listenSocket, port);
+        }
+        public void ListenUnixDomainSocket(string socketFile, IConnectionHandler handler)
+        {
+            if (!socketFile.Contains("/") && !socketFile.Contains("\\"))
+                socketFile = Path.Combine(Path.GetTempPath(), socketFile); // No path provided, so default to temp folder
 
+            if (File.Exists(socketFile))
+                File.Delete(socketFile);
+
+            Socket listenSocket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+
+            listenSocket.Bind(new UnixDomainSocketEndPoint(socketFile));
+            listenSocket.Listen(1024);
+
+            Handlers.Add(listenSocket, new ServerProtocol(handler, 0, false, (handler is SmtpHandler || handler is ImapHandler)));
+            StartAcceptThread(listenSocket, 0);
+        }
+        private void StartAcceptThread(Socket listenSocket, int port)
+        {
             var acceptThread = new Thread(new ThreadStart(() =>
             {
                 while (IsActive)
-                {                        
+                {
                     try
                     {
                         var clientSocket = listenSocket.Accept();
@@ -166,9 +186,16 @@ namespace Comgenie.Server
         }
 
         async Task InitConnection(Socket listenSocket, Socket clientSocket)
-        {                        
-            var remoteEndPoint = ((IPEndPoint?)clientSocket.RemoteEndPoint);
-            if (remoteEndPoint == null)
+        {
+            string clientIp = "@"; // uds fallback
+            int remotePort = 0;
+
+            if (clientSocket.RemoteEndPoint != null && clientSocket.RemoteEndPoint is IPEndPoint remoteEndPoint)
+            {
+                clientIp = remoteEndPoint.Address.ToString();
+                remotePort = remoteEndPoint.Port;
+            }
+            else if (clientSocket.RemoteEndPoint == null)
             {
                 Log.Info(nameof(Server), "Socket might not be connected anymore");
                 try
@@ -179,7 +206,6 @@ namespace Comgenie.Server
 
                 return;
             }
-            var clientIp = remoteEndPoint.Address.ToString();
 
             if (IPBanList.Contains(clientIp))
             {
@@ -200,7 +226,7 @@ namespace Comgenie.Server
                 LastDataReceivedMoment = DateTime.UtcNow,
                 LastDataSentMoment = DateTime.UtcNow,
                 RemoteAddress = clientIp,
-                RemoteAddressPort = remoteEndPoint.Port
+                RemoteAddressPort = remotePort
             };
 
             client.NetworkStream = new NetworkStream(clientSocket);
