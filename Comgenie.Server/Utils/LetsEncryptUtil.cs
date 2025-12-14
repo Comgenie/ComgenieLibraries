@@ -1,4 +1,5 @@
 ﻿using Comgenie.Server.Handlers.Http;
+using Comgenie.Util;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -132,9 +133,11 @@ namespace Comgenie.Server.Utils
         /// <exception cref="Exception">If the domain was not accessable from this server, or if the renew failed for any reason an exception will be thrown</exception>
         public async Task<bool> GenerateCertificateForDomain(string domain, bool force = false)
         {
-            if (!force && File.Exists(domain + ".pfx"))
+            var certificatePath = Path.Combine(GlobalConfiguration.SecretsFolder, domain + ".pfx");
+
+            if (!force && File.Exists(certificatePath))
             {
-                using (var certificate = X509CertificateLoader.LoadPkcs12FromFile(domain + ".pfx", Server.GetPfxKey()))
+                using (var certificate = X509CertificateLoader.LoadPkcs12FromFile(certificatePath, Server.PfxKey))
                 {
                     // Check if certificate we have is still valid for at least 14 days, if so: we don't have to do anything (unless force = true)                    
                     if (certificate.Issuer.Contains("Let's Encrypt") && DateTime.UtcNow.AddDays(14) < certificate.NotAfter) 
@@ -332,7 +335,10 @@ namespace Comgenie.Server.Utils
             // Combine cert with certificateRequest and export an .pfx
             var cert = X509CertificateLoader.LoadCertificate(pemCertificateData.bytes);
             cert = cert.CopyWithPrivateKey(certificateKey);
-            File.WriteAllBytes(domain + ".pfx", cert.Export(X509ContentType.Pkcs12, Server.GetPfxKey()));                
+
+            
+
+            File.WriteAllBytes(certificatePath, cert.Export(X509ContentType.Pkcs12, Server.PfxKey));                
             
             return true; // return true if we have a new certificate (this is used to instruct the Server to pick it up)
         }

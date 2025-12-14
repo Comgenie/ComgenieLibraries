@@ -425,11 +425,6 @@ namespace Comgenie.Server.Handlers.Smtp
 
                     if (AuthenticationCallBack == null)
                     {
-                        // Not supported and used yet, so any attempt is a h4x0r
-                        Log.Warning(nameof(SmtpHandler), "Added " + client.RemoteAddress + " to ban list");
-                        Server.IPBanList.Add(client.RemoteAddress);
-                        Server.SaveBanList();
-
                         await client.SendString("535 Not supported\r\n");
                         await client.Handler.ClientDisconnect(client);
                         await client.Disconnect();

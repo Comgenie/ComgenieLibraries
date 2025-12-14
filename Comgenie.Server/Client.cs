@@ -36,7 +36,7 @@ namespace Comgenie.Server
         private SemaphoreSlim IncomingHandlingLock { get; set; } = new SemaphoreSlim(1);
         private SemaphoreSlim SendLock { get; set; } = new SemaphoreSlim(1);
         
-        public async Task AddIncomingBufferData(byte[] data, int dataLen, Action? callBackFinished = null)
+        internal async Task AddIncomingBufferData(byte[] data, int dataLen, Action? callBackFinished = null)
         {
             LastDataReceivedMoment = DateTime.UtcNow;
             IncomingBuffers.Enqueue(new Tuple<byte[], int, Action?>(data, dataLen, callBackFinished));
@@ -65,7 +65,7 @@ namespace Comgenie.Server
             }
         }
         
-        public async Task Read()
+        internal async Task Read()
         {
             if (Server == null)
                 throw new Exception("Read task cannot be started for a non-server bound client");

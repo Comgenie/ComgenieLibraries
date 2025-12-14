@@ -38,11 +38,11 @@ namespace Comgenie.Storage
             if (string.IsNullOrEmpty(fileName))
             {
                 fileNameSpecified = false;
-                if (!Directory.Exists("Keys"))
-                    Directory.CreateDirectory("Keys");
+                if (!Directory.Exists(GlobalConfiguration.SecretsFolder))
+                    Directory.CreateDirectory(GlobalConfiguration.SecretsFolder);
 
                 var hash = SHA256.Create().ComputeHash(Encoding.UTF8.GetBytes(identity));
-                fileName = Path.Combine("Keys", "key-" + Convert.ToHexString(hash));
+                fileName = Path.Combine(GlobalConfiguration.SecretsFolder, "key-" + Convert.ToHexString(hash));
             }
 
             var keyStore = new KeyStore(fileName, encryptionKey, fileNameSpecified);
@@ -62,12 +62,12 @@ namespace Comgenie.Storage
         }
         public static bool Exists(string identity)
         {
-            if (!Directory.Exists("Keys"))
+            if (!Directory.Exists(GlobalConfiguration.SecretsFolder))
                 return false;
             identity = identity.ToLower();
 
             var hash = SHA256.Create().ComputeHash(Encoding.UTF8.GetBytes(identity));
-            var fileName = Path.Combine("Keys", "key-" + Convert.ToHexString(hash));
+            var fileName = Path.Combine(GlobalConfiguration.SecretsFolder, "key-" + Convert.ToHexString(hash));
             return File.Exists(fileName);
         }
 
@@ -123,7 +123,7 @@ namespace Comgenie.Storage
             {
                 var oldFileName = FileName;
                 var hash = SHA256.Create().ComputeHash(Encoding.UTF8.GetBytes(identity));
-                FileName = Path.Combine("Keys", "key-" + Convert.ToHexString(hash));
+                FileName = Path.Combine(GlobalConfiguration.SecretsFolder, "key-" + Convert.ToHexString(hash));
 
                 if (oldFileName != FileName)
                 {

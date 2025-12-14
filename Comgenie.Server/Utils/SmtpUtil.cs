@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Comgenie.Util;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -23,13 +24,21 @@ namespace Comgenie.Server.Utils
     public class SmtpUtil
     {
         private static Dictionary<string, RSACryptoServiceProvider?> DkimRsa = new Dictionary<string, RSACryptoServiceProvider?>();
+
         public static RSACryptoServiceProvider? GetDkimRsa(string domain, bool createIfNotExists=false, bool checkIfCorrectlyAddedToDomain=true)
         {
             if (!DkimRsa.ContainsKey(domain))
             {
+                if (!Directory.Exists(GlobalConfiguration.SecretsFolder))
+                    Directory.CreateDirectory(GlobalConfiguration.SecretsFolder);
+
+                var keyPath = Path.Combine(GlobalConfiguration.SecretsFolder, $"dkim-{domain}.key");
+                var pemPath = Path.Combine(GlobalConfiguration.SecretsFolder, $"dkim-{domain}.key");
+                var instructionsPath = Path.Combine(GlobalConfiguration.SecretsFolder, $"instruction-dns-for-{domain}.txt");
+
                 DkimRsa.Add(domain, null);
                 // Check if there is a dkim key pair
-                if (!File.Exists("dkim-"+domain+".key"))
+                if (!File.Exists(keyPath))
                 {
                     if (!createIfNotExists)
                         return null;
@@ -37,16 +46,16 @@ namespace Comgenie.Server.Utils
                     //public and private key data.
                     using (var rsaNew = new RSACryptoServiceProvider(2048))
                     {
-                        if (File.Exists("dkim-" + domain + ".pem"))
-                            rsaNew.ImportFromPem(File.ReadAllText("dkim-" + domain + ".pem"));
+                        if (File.Exists(pemPath))
+                            rsaNew.ImportFromPem(File.ReadAllText(pemPath));
 
-                        File.WriteAllBytes("dkim-" + domain + ".key", rsaNew.ExportCspBlob(true));
-                        File.WriteAllText("instruction-dns-for-" + domain + ".txt", "Create a DNS record with the following settings: \r\nName: dkim._domainkey\r\nTTL: 1 hour\r\nType: TXT\r\nValue: v=DKIM1;t=s;k=rsa;p=" + SmtpUtil.ExportPublicKey(rsaNew));
+                        File.WriteAllBytes(keyPath, rsaNew.ExportCspBlob(true));
+                        File.WriteAllText(instructionsPath, "Create a DNS record with the following settings: \r\nName: dkim._domainkey\r\nTTL: 1 hour\r\nType: TXT\r\nValue: v=DKIM1;t=s;k=rsa;p=" + SmtpUtil.ExportPublicKey(rsaNew));
                     }
                 } 
 
                 var rsa = new RSACryptoServiceProvider(2048);
-                rsa.ImportCspBlob(File.ReadAllBytes("dkim-"+domain+".key"));
+                rsa.ImportCspBlob(File.ReadAllBytes(keyPath));
 
                 // Check if the DKIM TXT record is added to the domain                
                 if (checkIfCorrectlyAddedToDomain)

@@ -1,6 +1,7 @@
 ﻿using Comgenie.Server.Handlers;
 using Comgenie.Server.Handlers.Imap;
 using Comgenie.Server.Handlers.Smtp;
+using Comgenie.Util;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -25,44 +26,64 @@ namespace Comgenie.Server
 {
     public class Server : IDisposable
     {
-        public const int MaxPacketSize = 1024 * 32;
+        internal const int MaxPacketSize = 1024 * 32;
 
-        private string? PfxKey = null;
+        /// <summary>
+        /// Key used to protect certificates.
+        /// If none is set when adding a domain, a random key will be chosen and saved in the secrets folder in the fole do-not-share.key.
+        /// </summary>
+        public string? PfxKey { get; set; } = null;
+
+        /// <summary>
+        /// Used as fallback if a matching domain could not be found (for example for incoming http requests).
+        /// If none is set, the first domain added with .AddDomain() is used.
+        /// </summary>
         public string? DefaultDomain { get; set; }
+
+        /// <summary>
+        /// Current added domains. Note: Only add domains using the .AddDomain() method.
+        /// </summary>
+        public HashSet<string> Domains { get; internal set; } = new();
+
+        /// <summary>
+        /// Current connected clients.
+        /// </summary>
+        public List<Client> Clients { get; set; } = new();
 
         // The server handler will listen to all ports, accept connections and handle SSL
         // It will then forward the data to any connectionhandlers attached
         private Dictionary<Socket, ServerProtocol> Handlers = new Dictionary<Socket, ServerProtocol>();
-        private static Dictionary<string, X509Certificate> ServerCertificates = new Dictionary<string, X509Certificate>();
-        public static HashSet<string> IPBanList = new HashSet<string>();
 
+
+        internal bool IsActive = true;
+        internal ConcurrentStack<byte[]> Buffers = new ConcurrentStack<byte[]>();
+
+        private static Dictionary<string, X509Certificate> ServerCertificates = new Dictionary<string, X509Certificate>();
         private static List<Server>? ActiveInstances { get; set; }
         private static Thread? CleanUpThread { get; set; }
-        public HashSet<string> Domains { get; set; }
-        
-        public bool IsActive = true;
-        public ConcurrentStack<byte[]> Buffers = new ConcurrentStack<byte[]>();
-        public List<Client> Clients = new List<Client>();
-        
-        public static void SaveBanList()
-        {            
-            File.WriteAllText("IPBanList.json", JsonSerializer.Serialize(IPBanList));
-        }
-        public static void LoadBanList()
+
+        private Func<string, Socket, bool>? IncomingConnectionShouldAcceptHandler { get; set; }
+
+        /// <summary>
+        /// Set a custom handler to control if an incoming connection should be accepted or not.
+        /// This can be used to implement a ban-list. 
+        /// Note that due to OS limits a rejected connection is actually accepted and directly disconnected.
+        /// </summary>
+        /// <param name="incomingConnectionShouldAcceptHandler">The handler bool (ip, clientSocket), return true to accept the connection</param>
+        public void SetIncomingConnectionShouldAcceptHandler(Func<string, Socket, bool>? incomingConnectionShouldAcceptHandler)
         {
-            if (File.Exists("IPBanList.json"))
-            {
-                var ipBanList = JsonSerializer.Deserialize<HashSet<string>>(File.ReadAllText("IPBanList.json"));
-                if (ipBanList != null)
-                    IPBanList = ipBanList;
-            }
+            IncomingConnectionShouldAcceptHandler = incomingConnectionShouldAcceptHandler;
         }
 
+        /// <summary>
+        /// Initializes a new instance of the Comgenie.Server.
+        /// This is responsible for accepting for incoming connections, completing tls handshakes and forwarding data to the correct handlers.
+        /// </summary>
         public Server()
         {
-            Domains = new HashSet<string>();
             if (ActiveInstances == null)
             {
+                // Create a single clean-up thread for all server instances
                 ActiveInstances = new List<Server>();
                 CleanUpThread = new Thread(new ThreadStart(() => {
                     while (true)
@@ -75,6 +96,8 @@ namespace Comgenie.Server
                         foreach (Server instance in instances)
                             instance.CleanUpOldClients();
 
+                        // TODO: Also reload certificates once in a while as they can also be changed from other processes
+
                         Thread.Sleep(10 * 1000);
                     }
                 }));                
@@ -84,37 +107,50 @@ namespace Comgenie.Server
                 ActiveInstances.Add(this);
         }
 
+        /// <summary>
+        /// Adds a domain to this server instance and optionally set it as default (used as fallback)
+        /// This also loads the certificate for each domain added, and generates a self-signed one in case none is found in the secrets folder.
+        /// </summary>
+        /// <param name="domain">Domain name</param>
+        /// <param name="setAsDefault">If set to true this domain will be used in case no matching domain can be found for incoming requests.</param>
         public void AddDomain(string domain, bool setAsDefault = false)
         {
             domain = domain.ToLower();
             lock (ServerCertificates)
             {
+                if (!Directory.Exists(GlobalConfiguration.SecretsFolder))
+                    Directory.CreateDirectory(GlobalConfiguration.SecretsFolder);
+                
                 if (PfxKey == null)
                 {
+                    var pfxKeyPath = Path.Combine(GlobalConfiguration.SecretsFolder, "do-not-share.key");
+
                     // By default we will generate a key file containing the .pfx key for this application on this machine
                     // This will of course not be done if there is a key already specified using SetPfxKey before adding any domains
-                    if (File.Exists("do-not-share.key"))
-                        PfxKey = File.ReadAllText("do-not-share.key");
+                    if (File.Exists(pfxKeyPath))
+                        PfxKey = File.ReadAllText(pfxKeyPath);
                     else
                     {
                         PfxKey = Guid.NewGuid().ToString().Replace("-", "").Substring(0, 12);
-                        File.WriteAllText("do-not-share.key", PfxKey);
+                        File.WriteAllText(pfxKeyPath, PfxKey);
                     }
                 }
 
                 // Load certificate (or create self signed if we don't have any yet). The LetsEncrypt tool can replace this for us
-                if (!File.Exists(domain + ".pfx"))
-                    GenerateSelfSignedCertificate(domain);
+                var certificatePath = Path.Combine(GlobalConfiguration.SecretsFolder, domain + ".pfx");
 
-                var certificate = X509CertificateLoader.LoadPkcs12FromFile(domain + ".pfx", PfxKey);// new X509Certificate2(domain + ".pfx", PfxKey);
+                if (!File.Exists(certificatePath))
+                    File.WriteAllBytes(certificatePath, GenerateSelfSignedCertificate(domain));
+
+                var certificate = X509CertificateLoader.LoadPkcs12FromFile(certificatePath, PfxKey);// new X509Certificate2(domain + ".pfx", PfxKey);
                 if (DateTime.UtcNow > certificate.NotAfter)
                 {
                     // Certificate is not valid anymore, generate a new self-signed one
                     certificate.Dispose();
-                    GenerateSelfSignedCertificate(domain);
-                    certificate = X509CertificateLoader.LoadPkcs12FromFile(domain + ".pfx", PfxKey);
+                    File.WriteAllBytes(certificatePath, GenerateSelfSignedCertificate(domain));
+                    certificate = X509CertificateLoader.LoadPkcs12FromFile(certificatePath, PfxKey);
                 }
-
+                
                 if (ServerCertificates.ContainsKey(domain)) // Reload           
                     ServerCertificates[domain] = certificate;
                 else
@@ -127,19 +163,14 @@ namespace Comgenie.Server
             }
         }
 
-        public void SetPfxKey(string newKey)
-        {
-            this.PfxKey = newKey;
-        }
-        internal string? GetPfxKey()
-        {
-            return this.PfxKey;
-        }
-
+        /// <summary>
+        /// Start listening on a tcp/ip port, optionally handle the tls handshake and forward the incoming data to the connection handler.
+        /// </summary>
+        /// <param name="port">Port to listen on</param>
+        /// <param name="ssl">If set to true, this connection will be handled as a tls connection and a handshake is automatically done using the certificate in the secrets folder.</param>
+        /// <param name="handler">The handler to forward the incoming data to</param>
         public void Listen(int port, bool ssl, IConnectionHandler handler)
         {
-            LoadBanList();
-
             Socket listenSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
             listenSocket.Bind(new IPEndPoint(IPAddress.Any, port));
             listenSocket.Listen(1024);
@@ -147,6 +178,12 @@ namespace Comgenie.Server
             Handlers.Add(listenSocket, new ServerProtocol(handler, port, ssl, (handler is SmtpHandler || handler is ImapHandler)));
             StartAcceptThread(listenSocket, port);
         }
+
+        /// <summary>
+        /// Start listening using an unix domain socket file.
+        /// </summary>
+        /// <param name="socketFile">Path to a local file path. The path has to be below 100 characters. Note that this file will be deleted if it exists already!</param>
+        /// <param name="handler">The handler to forward the incoming data to</param>
         public void ListenUnixDomainSocket(string socketFile, IConnectionHandler handler)
         {
             if (!socketFile.Contains("/") && !socketFile.Contains("\\"))
@@ -163,6 +200,8 @@ namespace Comgenie.Server
             Handlers.Add(listenSocket, new ServerProtocol(handler, 0, false, (handler is SmtpHandler || handler is ImapHandler)));
             StartAcceptThread(listenSocket, 0);
         }
+
+
         private void StartAcceptThread(Socket listenSocket, int port)
         {
             var acceptThread = new Thread(new ThreadStart(() =>
@@ -185,7 +224,7 @@ namespace Comgenie.Server
             acceptThread.Start();
         }
 
-        async Task InitConnection(Socket listenSocket, Socket clientSocket)
+        private async Task InitConnection(Socket listenSocket, Socket clientSocket)
         {
             string clientIp = "@"; // uds fallback
             int remotePort = 0;
@@ -207,9 +246,9 @@ namespace Comgenie.Server
                 return;
             }
 
-            if (IPBanList.Contains(clientIp))
+            if (IncomingConnectionShouldAcceptHandler != null && !IncomingConnectionShouldAcceptHandler(clientIp, clientSocket))
             {
-                Log.Info(nameof(Server), "Refused connection from banned ip " + clientIp);
+                Log.Info(nameof(Server), "Rejected connection from ip " + clientIp);
                 clientSocket.Close();
                 return;
             }
@@ -244,85 +283,15 @@ namespace Comgenie.Server
                 //StartReadTask(client);
             }
         }
-        /*public void StartReadTask(Client client)
-        {                       
-            var clientSocket = client.Socket;
-            var task = Task.Run(async () =>
-            {
-                Log.Debug(nameof(Server), "[ReadTask] Start handling client");
 
-                try
-                {
-                    client.StreamReadingCancellationTokenSource = new CancellationTokenSource(); // NOTE: We cannot use this in all situations as it automatically disconnects the socket if its triggered during ReadAsync.. Check if fixed by MS in the future
-
-                    var processingCount = 0;
-                    while (clientSocket.Connected && IsActive)
-                    {
-                        try
-                        {
-                            if (client.StreamIsReady && processingCount < client.MaxProcessingCount) 
-                            {
-                                byte[] buffer;
-                                if (!Buffers.TryPop(out buffer))
-                                    buffer = new byte[MaxPacketSize];
-                                
-                                client.Stream.ReadTimeout = -1;                                
-                                var len = await client.Stream.ReadAsync(buffer, 0, buffer.Length, client.StreamReadingCancellationTokenSource.Token);
-                                if (len == 0 || client.Stream == null)
-                                {
-                                    Log.Debug(nameof(Server), "[ReadTask] No more data, len: " + len);
-                                    break;
-                                }
-
-                                processingCount++;
-                                client.AddIncomingBufferData(buffer, len, () =>
-                                {
-                                    // Give buffer back to pool (unless the pool is too large)
-                                    if (Buffers.Count < 100)
-                                        Buffers.Push(buffer);                                    
-                                    processingCount--;
-                                });                                                      
-                            }
-                            else
-                            {
-                                await Task.Delay(25);
-                            }
-                        } 
-                        catch (OperationCanceledException e) // Cancelled read
-                        {
-                            client.StreamReadingCancellationTokenSource = new CancellationTokenSource();
-                            Log.Debug(nameof(Server), "[ReadTask] Could not read client stream Exception [2]  (Client connected " + clientSocket.Connected + "): " + e);
-                        }
-                        
-                        if (client.CancellationCallBack != null)
-                        {
-                            Log.Debug(nameof(Server), "[ReadTask] Calling cancellation callback (Client connected " + clientSocket.Connected + ")");
-
-                            client.CancellationCallBack();
-                            client.CancellationCallBack = null;
-                            client.StreamReadingCancellationTokenSource = new CancellationTokenSource();
-                        }
-                    }
-                }
-                catch (Exception e)
-                {
-                    Log.Debug(nameof(Server), "[ReadTask] ould not read client stream Exception: " + e);
-                }
-
-
-                Log.Debug(nameof(Server), "[ReadTask] Stopping to handle client (Client connected " + clientSocket.Connected + ")");
-
-                await client.Disconnect();
-
-                lock (Clients)
-                    Clients.Remove(client);
-
-                Log.Debug(nameof(Server), "[ReadTask] Stop handling client");
-            });
-
-            lock (Clients)
-                Clients.Add(client);
-        }*/
+        /// <summary>
+        /// Start handshake process with client.
+        /// Normally this is done automatically if 'ssl' was set to true in the .Listen call.
+        /// But in some situations (StartTLS in smtp protocol) it needs to be done on demand.
+        /// </summary>
+        /// <param name="client">Connected client to start the handshake with</param>
+        /// <param name="preferDomain">If the client sends a domain which we don't recognize, we will use this one instead (and the DefaultDomain one after that).</param>
+        /// <param name="callBackStreamReadingStopped">After all waiting reading processes stopped, this can be used to send a message before the actual handshake starts.</param>
         public void EnableSSLOnClient(Client client, string? preferDomain=null, Action? callBackStreamReadingStopped = null)
         {
             var isUpgradedConnection = client.Stream != null;
@@ -342,23 +311,8 @@ namespace Comgenie.Server
 
             client.StreamIsReady = false; // This stops the read thread from reading the stream in the meantime
 
-            // If the CancellationTokenSource is fixed in the future, we can use this. Now we have to use MaxProcessingCount == 1 to make Upgrading SSL work
-            /*if (client.StreamReadingCancellationTokenSource != null) 
-            {                                
-                bool waiting = true;
-                client.CancellationCallBack = () => {
-                    waiting = false;
-                };
-
-                client.StreamReadingCancellationTokenSource.Cancel();
-
-                while (waiting)
-                    Thread.Sleep(10);                
-            } */
-
             if (callBackStreamReadingStopped != null)
-                callBackStreamReadingStopped();
-            
+                callBackStreamReadingStopped(); // tODO: This one might be obsolete now we've changed to async read calls.
             
             var ssl = new SslStream(client.NetworkStream!, false);
             client.Stream = ssl;
@@ -419,7 +373,7 @@ namespace Comgenie.Server
             });
         }
 
-        private void GenerateSelfSignedCertificate(string domain)
+        private byte[] GenerateSelfSignedCertificate(string domain)
         {
             using (var ecdsa = ECDsa.Create(ECCurve.NamedCurves.nistP384))
             { 
@@ -427,7 +381,7 @@ namespace Comgenie.Server
                 var req = new CertificateRequest("cn=" + domain, ecdsa, HashAlgorithmName.SHA256);
                 var cert = req.CreateSelfSigned(DateTimeOffset.Now, DateTimeOffset.Now.AddYears(5));
                 // Create PFX (PKCS #12) with private key
-                File.WriteAllBytes(domain + ".pfx", cert.Export(X509ContentType.Pfx, PfxKey));
+                return cert.Export(X509ContentType.Pfx, PfxKey);
 
                 // Create Base 64 encoded CER (public key only)
                 /*File.WriteAllText(domain + ".cer",
@@ -437,7 +391,7 @@ namespace Comgenie.Server
             }
         }
 
-        public void CleanUpOldClients(int noActivitySeconds = 120)
+        private void CleanUpOldClients(int noActivitySeconds = 120)
         {
             var inactiveMoment = DateTime.UtcNow.AddSeconds(-noActivitySeconds);
 
@@ -448,6 +402,10 @@ namespace Comgenie.Server
             foreach (var client in inactiveClients)
                 client.Disconnect().Wait(); // This stops all read tasks
         }
+
+        /// <summary>
+        /// Disposes this Server instance. This also disconnects all clients connected to this server instance.
+        /// </summary>
         public void Dispose()
         {
             IsActive = false;
