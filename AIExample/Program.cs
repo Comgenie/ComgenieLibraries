@@ -22,12 +22,105 @@ namespace AIExample
                 CostPromptToken = 0 // Cost per token for prompt
             };
 
+            //FlowExample(model).Wait();
+            //MultipleFlowExample(model).Wait();
             //AgentExample(model).Wait();
             StructuredResponseExample(model).Wait();
             DocumentExample(model).Wait();
             EmbeddingsExample(model).Wait();
             ToolCallExample(model).Wait();
         }
+        static async Task FlowExample(ModelInfo model)
+        {
+            var llm = new LLM(model, false);
+
+            var resp = await llm.BuildFlow()
+                .SetSystemPrompt("You are JokeBot 3000")
+                .AddStructuredStep<Joke>("Generate a fun joke about coffee", a => {
+
+                    a.Data = new Joke()
+                    {
+                        Setup = "How does the coffee run?",
+                        Punchline = "Fast!"
+                    };
+                    Console.WriteLine(a.Data.Setup);
+                    Console.WriteLine(a.Data.Punchline);
+
+                    var jokeIsAboutCoffee = 
+                        a.Data.Setup.Contains("coffee", StringComparison.OrdinalIgnoreCase) ||
+                        a.Data.Setup.Contains("caffeine", StringComparison.OrdinalIgnoreCase) ||
+                        a.Data.Setup.Contains("beans", StringComparison.OrdinalIgnoreCase);
+                    
+                    
+                    //a.Goto(llm.BuildFlow().AddStep("Tell me a good story about cookies", b => b.Proceed()));
+                    //return;
+                    
+                    if (!jokeIsAboutCoffee)
+                        a.Retry("Make it more about coffee");
+                    else
+                        a.Proceed();
+                })
+                .AddStep("Do you like this joke?")
+                .GenerateResponse();
+            
+            Console.WriteLine("Final answer: " + resp?.LastAsString());
+        }
+
+        static async Task MultipleFlowExample(ModelInfo model)
+        {
+            var llm = new LLM(model);
+
+            InstructionFlowContext? context = null;
+            while (context == null || !context.Completed)
+            {
+                context = await llm.BuildFlow()
+                    .SetSystemPrompt("You tell the horoscope of the user by being creative and making up fun theories in an engaging way. If you need more information just ask the user.")
+                    .AddStep(
+                        "System: Ask about the users birthdate (month + date), their favorite animal and favorite food. Only ask one question at the same time in the same message. Don't give a horoscope yet." +
+                        "Say the tag [Continue] if you think that the user already mentioned all of it. Don't tell the user to say the Continue tag.", a => {
+
+                            if (a.Text?.Contains("[Continue]", StringComparison.OrdinalIgnoreCase) == true)
+                            {
+                                a.Proceed();
+                                return;
+                            }
+                        
+                            Console.WriteLine("AI: " + a.Text);
+
+                            // Flow example where we can directly provide an answer
+                            //var userPrompt = Console.ReadLine();
+                            //a.FlowContext.Messages.Add(new ChatUserMessage(userPrompt));
+                            //a.Retry();
+
+                            // Flow where we need to wait for external data and resume at a later moment
+                            a.Stop();
+                    })
+                    .AddStructuredStep<UserHoroscopeData>("System: Format the answers from the user", a => Console.WriteLine("JSON: " + JsonSerializer.Serialize(a.Data)))
+                    .AddStep("System: Please provide a fun engaging horoscope to the user based on their given details.", a => Console.WriteLine("AI: " + a.Text))
+                    .GenerateWithContext(context);
+
+
+                if (!context.Completed) 
+                {
+                    // The flow stopped because the AI wants user input
+                    var userPrompt = Console.ReadLine();
+                    context.Messages.Add(new ChatUserMessage(userPrompt));
+                }
+            }
+        }
+
+        class UserHoroscopeData
+        {
+            [Instruction("The number of the month (1 to 12).")]
+            public int BirthMonth { get; set; }
+            [Instruction("The number of the date (1 to 31)")]
+            public int BirthDate { get; set; }
+            [Instruction]
+            public string FavoriteAnimal { get; set; }
+            [Instruction]
+            public string FavoriteFood { get; set; }
+        }
+
 
         static async Task StructuredResponseExample(ModelInfo model)
         {
