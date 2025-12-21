@@ -17,7 +17,7 @@ namespace Comgenie.AI
         {
             return new InstructionFlow(this, name);
         }
-        public async Task<InstructionFlowContext> GenerateUsingFlow(InstructionFlow flow, InstructionFlowContext? resumeFromContext=null)
+        public async Task<InstructionFlowContext> GenerateUsingFlowAsync(InstructionFlow flow, InstructionFlowContext? resumeFromContext=null, CancellationToken? cancellationToken = null)
         {
             var context = resumeFromContext ?? new InstructionFlowContext();
             if (resumeFromContext != null)
@@ -36,11 +36,23 @@ namespace Comgenie.AI
             {
                 context.FlowPositions.Add(new InstructionFlowPositionContext() { Flow = flow, FlowName = flow.Name });
             }
+
+            context.CancellationToken = cancellationToken;
+            context.GenerationOptions = DefaultGenerationOptions;
             
             while (context.FlowPositions.Count > 0)
             {
+                if (cancellationToken.HasValue)
+                    cancellationToken.Value.ThrowIfCancellationRequested();
+
                 var currentFlow = context.Current.Flow;
-                
+
+                // Update current step
+                context.Current.CurrentStep = context.Current.NextStep;
+
+                // Set default proceeding
+                context.Current.NextStep = context.Current.CurrentStep + 1;
+
                 if (context.Current.CurrentStep >= currentFlow.Steps.Count)
                 {
                     // Pop last item from stack
@@ -48,14 +60,8 @@ namespace Comgenie.AI
                     continue;
                 }
 
-                // Set default proceeding
-                context.Current.NextStep = context.Current.CurrentStep + 1;
-
                 // Executes the LLM actions
                 await currentFlow.Steps[context.Current.CurrentStep].Execute(this, context);
-
-                // Update current step
-                context.Current.CurrentStep = context.Current.NextStep;
 
                 if (context.Current.StopRequested)
                     return context;
@@ -77,8 +83,8 @@ namespace Comgenie.AI
             Name = name;
         }
         internal List<InstructionFlow> RelatedFlows { get; set; } = new();
-        internal List<InstructionFlowStep> Steps { get; set; } = new();
-        public InstructionFlow SetSystemPrompt(string systemPrompt)
+        public List<InstructionFlowStep> Steps { get; set; } = new();
+        public InstructionFlow AddSystemPromptStep(string systemPrompt)
         {
             Steps.Add(new InstructionFlowStep()
             {
@@ -92,6 +98,86 @@ namespace Comgenie.AI
             });
             return this;
         }
+        public InstructionFlow AddOptionsStep(Action<LLMGenerationOptions> changeOptionsHandler)
+        {
+            Steps.Add(new InstructionFlowStep()
+            {
+                Execute = async (llm, context) =>
+                {
+                    // Create a copy in case this options instance is used elsewhere 
+                    context.GenerationOptions = context.GenerationOptions.Clone();
+                    changeOptionsHandler(context.GenerationOptions);
+                }
+            });
+            return this;
+        }
+        public InstructionFlow AddClearMessagesStep(bool includingSystemMessage=false)
+        {
+            Steps.Add(new InstructionFlowStep()
+            {
+                Execute = async (llm, context) =>
+                {
+                    if (includingSystemMessage)
+                        context.Messages.Clear();
+                    else
+                        context.Messages.RemoveAll(a => a is not ChatSystemMessage);
+                }
+            });
+            return this;
+        }
+        
+        public InstructionFlow AddRepeatableStep(string instruction, Action<InstructionFlowTextAnswer>? answerHandler = null)
+        {
+            return AddRepeatableStep(instruction, null, answerHandler);
+        }
+        public InstructionFlow AddRepeatableStep(string instruction, Action<InstructionFlow, string>? customSubFlowHandler)
+        {
+            return AddRepeatableStep(instruction, customSubFlowHandler, null);
+        }
+        private InstructionFlow AddRepeatableStep(string instruction, Action<InstructionFlow, string>? customSubFlowHandler, Action<InstructionFlowTextAnswer>? answerHandler = null)
+        {
+            Steps.Add(new InstructionFlowStep()
+            {
+                Execute = async (llm, context) =>
+                {
+                    var prompt = "<UserInstruction>" + instruction + "</UserInstruction>\r\n\r\nAbove is the original user instruction to repeat an action one or more times. Please first generate the list we will enumerate through to execute the requested users action.";
+                    context.Messages.Add(new ChatUserMessage(prompt));
+                    var listResponse = await llm.GenerateStructuredResponseAsync<RepeatableStepResponse>(context.Messages, true, context.GenerationOptions, context.CancellationToken);
+                    if (listResponse != null && listResponse.List != null && listResponse.List.Count > 0)
+                    {
+                        
+                        // Turn list into new instruction flow
+                        var repeatableFlow = llm.BuildFlow("RepeatableFlow");
+
+                        foreach (var listItem in listResponse.List)
+                        {
+                            if (customSubFlowHandler != null)
+                            {
+                                customSubFlowHandler(repeatableFlow, listItem);
+                            }
+                            else
+                            {
+                                Console.WriteLine("Adding list item: " + listItem);
+                                prompt = "<UserInstruction>" + instruction + "</UserInstruction>\r\n\r\nAbove is the original user instruction to repeat an action one or more times. You've turned it into a list of items to enumerate through. You are now executing the users instruction for the item \"" + listItem + "\".";
+                                repeatableFlow.AddStep(prompt, answerHandler);
+                            }
+                        }
+
+                        // Creating a dummy answer to use the flow control ability to step into our newly created flow
+                        var tmpAnswer = new InstructionFlowTextAnswer() { FlowContext = context, Text = "unused" };
+                        tmpAnswer.Goto(repeatableFlow, 0, true);
+                    }
+                }
+            });
+
+            return this;
+        }
+        class RepeatableStepResponse
+        {
+            [Instruction("List as a string array")]
+            public List<string> List { get; set; } = new();
+        }
+            
         public InstructionFlow AddStep(string instruction, Action<InstructionFlowTextAnswer>? answerHandler=null)
             => AddStep(new ChatUserMessage(instruction), answerHandler);
         public InstructionFlow AddStep(ChatUserMessage message, Action<InstructionFlowTextAnswer>? answerHandler = null)
@@ -103,33 +189,16 @@ namespace Comgenie.AI
             {
                 Execute = async (llm, context) =>
                 {
-                    context.Messages.Add(message);
-                    var resp = await llm.GenerateResponseAsync(context.Messages);
+                    if (context.Messages.Count == 0 || context.Messages.Last() is not ChatUserMessage) // A message might've been provided during retry
+                        context.Messages.Add(message);
+
+                    var resp = await llm.GenerateResponseAsync(context.Messages, context.GenerationOptions, context.CancellationToken);
+                    context.LastChatResponse = resp;
                     var answer = new InstructionFlowTextAnswer() { FlowContext = context, Text = resp?.LastAsString() };
                     answerHandler(answer);
                     
                 }
             });
-            return this;
-        }
-        public InstructionFlow AddScriptStep(string instruction, Action<InstructionFlowScriptAnswer>? answerHandler = null)
-            => AddScriptStep(new ChatUserMessage(instruction), answerHandler);
-        public InstructionFlow AddScriptStep(ChatUserMessage message, Action<InstructionFlowScriptAnswer>? answerHandler = null)
-        {
-            if (answerHandler == null)
-                answerHandler = (a) => a.Proceed();
-
-            Steps.Add(new InstructionFlowStep()
-            {
-                Execute = async (llm, context) =>
-                {
-                    context.Messages.Add(message);
-                    var resp = await llm.GenerateScriptAsync(context.Messages);
-                    var answer = new InstructionFlowScriptAnswer() { FlowContext = context, Script = resp };
-                    answerHandler(answer);
-                }
-            });
-            
             return this;
         }
         public InstructionFlow AddStructuredStep<T>(string instruction, Action<InstructionFlowStructuredAnswer<T>>? answerHandler = null)
@@ -143,10 +212,30 @@ namespace Comgenie.AI
             {
                 Execute = async (llm, context) =>
                 {
-                    context.Messages.Add(message);
-                    var resp = await llm.GenerateStructuredResponseAsync<T>(context.Messages);
+                    if (context.Messages.Count == 0 || context.Messages.Last() is not ChatUserMessage) // A message might've been provided during retry
+                        context.Messages.Add(message);
+                    var resp = await llm.GenerateStructuredResponseAsync<T>(context.Messages, true, context.GenerationOptions, context.CancellationToken);
                     var answer = new InstructionFlowStructuredAnswer<T>() { FlowContext = context, Data = resp };
                     answerHandler(answer);
+                }
+            });
+            return this;
+        }
+        public InstructionFlow AddDeepDiveDocumentsStep(string instruction, Action<InstructionFlowTextAnswer>? answerHandler = null)
+        {
+            if (answerHandler == null)
+                answerHandler = (a) => a.Proceed();
+
+            Steps.Add(new InstructionFlowStep()
+            {
+                Execute = async (llm, context) =>
+                {
+                    var resp = await llm.GenerateDeepDiveDocumentsResponseAsync(instruction, generationOptions: context.GenerationOptions, cancellationToken: context.CancellationToken);
+                    var answer = new InstructionFlowTextAnswer() { FlowContext = context, Text = resp };
+                    context.Messages.Add(new ChatAssistantMessage() { content = resp });
+
+                    answerHandler(answer);
+                    
                 }
             });
             return this;
@@ -156,27 +245,52 @@ namespace Comgenie.AI
             RelatedFlows.Add(flow);
             return this;
         }
-        public Task<InstructionFlowContext> Generate()
+        public Task<InstructionFlowContext> GenerateAsync(CancellationToken? cancellationToken = null)
         {
-            return LLMInstance.GenerateUsingFlow(this);
+            return LLMInstance.GenerateUsingFlowAsync(this, null, cancellationToken);
         }
-        public Task<InstructionFlowContext> GenerateWithContext(InstructionFlowContext resumeFromContext)
+        public Task<InstructionFlowContext> GenerateWithContextAsync(InstructionFlowContext resumeFromContext, CancellationToken? cancellationToken = null)
         {
-            return LLMInstance.GenerateUsingFlow(this, resumeFromContext);
+            return LLMInstance.GenerateUsingFlowAsync(this, resumeFromContext, cancellationToken);
         }
-        public async Task<ChatResponse?> GenerateResponse()
+
+        /* Disabled for now as it might be too confusing
+        public async Task<ChatResponse?> GenerateResponseAsync(CancellationToken? cancellationToken = null)
         {
-            return (await LLMInstance.GenerateUsingFlow(this)).LastChatResponse;
-        }
+            return (await LLMInstance.GenerateUsingFlowAsync(this, null, cancellationToken)).LastChatResponse;
+        }*/
 
         public abstract class InstructionFlowAnswer
         {
             public required InstructionFlowContext FlowContext { get; set; }
-            public void Proceed(bool includeHistory = true) 
-                => FlowContext.Current.NextStep = FlowContext.Current.CurrentStep + 1; // Default
-            public void Retry(string? customInstruction = null, bool includeHistory = true)
-                => FlowContext.Current.NextStep = FlowContext.Current.CurrentStep;
-            public void Restart(string? customInstruction = null)
+            private void RemoveLastHistory()
+            {
+                // Remove last message including the user message as it will be re-added
+                for (var i = FlowContext.Messages.Count - 1; i >= 0; i--)
+                {
+                    var message = FlowContext.Messages[i];
+                    FlowContext.Messages.RemoveAt(i);
+                    if (message is ChatUserMessage)
+                        break;
+                }
+            }
+            public void Proceed(bool includeHistory = true)
+            {
+                if (!includeHistory)
+                    FlowContext.Messages.Clear();
+                FlowContext.Current.NextStep = FlowContext.Current.CurrentStep + 1; // Default
+            }
+            public void Retry(string? customInstruction = null, bool keepFailedMessage = true)
+            {
+                if (!keepFailedMessage)
+                    RemoveLastHistory();
+
+                if (!string.IsNullOrEmpty(customInstruction))
+                    FlowContext.Messages.Add(new ChatUserMessage(customInstruction));
+                
+                FlowContext.Current.NextStep = FlowContext.Current.CurrentStep;
+            }
+            public void Restart()
                 => FlowContext.Current.NextStep = 0;
             public void Goto(int step)
                 => FlowContext.Current.NextStep = step;
@@ -244,7 +358,7 @@ namespace Comgenie.AI
             public required string? Script { get; set; }
         }
 
-        internal class InstructionFlowStep
+        public class InstructionFlowStep
         {
             public required Func<LLM, InstructionFlowContext, Task> Execute { get; set; }
         }

@@ -12,7 +12,7 @@ namespace Comgenie.AI
 {
     public partial class LLM
     {
-        private List<ToolCallInfo> Tools { get; set; } = new();
+        public List<ToolCallInfo> Tools { get; set; } = new();
 
         /// <summary>
         /// Pass a method to make available for the LLM to call.
@@ -21,7 +21,7 @@ namespace Comgenie.AI
         /// <param name="method">Reference to the method you want to make available to the LLM.</param>
         public void AddToolCall(Delegate method)
         {
-            var toolInfo = ToolCallUtil.BuildToolCallInfoFromMethod(method.Method, method.Target);
+            var toolInfo = ToolCallUtil.BuildToolCallInfoFromMethod(method.Method, method.Target, method);
 
             var testJson = JsonSerializer.Serialize(toolInfo, new JsonSerializerOptions()
             {

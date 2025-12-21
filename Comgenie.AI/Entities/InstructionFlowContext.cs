@@ -8,6 +8,10 @@ namespace Comgenie.AI.Entities
 
         [JsonIgnore]
         internal InstructionFlowPositionContext Current => FlowPositions.Last();
+        [JsonIgnore]
+        public CancellationToken? CancellationToken { get; set; }
+        [JsonIgnore]
+        public LLMGenerationOptions GenerationOptions { get; set; } = new();
 
         public ChatResponse? LastChatResponse { get; set; }
         public List<ChatMessage> Messages { get; set; } = new();

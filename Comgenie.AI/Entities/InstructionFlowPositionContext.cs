@@ -10,5 +10,6 @@ namespace Comgenie.AI.Entities
         public int CurrentStep { get; set; }
         public int NextStep { get; set; }
         public bool StopRequested { get; set; }
+
     }
 }

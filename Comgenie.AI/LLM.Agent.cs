@@ -13,36 +13,56 @@ namespace Comgenie.AI
     public partial class LLM
     {
         /// <summary>
-        /// Generate a plan and run the LLM in agent mode.
+        /// Generate a plan and form an instruction flow based on the given users instructions.
+        /// This flow can be seen as a plan to fulfill the users instruction but will not directly be executed.
+        /// Note that this may generate flows which expand upon itself during execution based on information retrieved during execution.
         /// </summary>
-        /// <param name="messages">List of at least 1 message ending with a user message.</param>
-        /// <param name="temperature">Optional: Temperature. Change to make the LLM respond more creative or not.</param>
-        /// <param name="addResponseToMessageList">Optional: If set to true, the given messages list will be expanded with the assistant response and if applicable: tool responses.</param>
-        /// <param name="assistantCallBack">Optional: For every assistant answer this callback will be called. During agent mode multiple assistant responses will be called.</param>
-        /// <returns>The last assistant response from the LLM</returns>
-        public async Task<ChatResponse?> GenerateSolutionAsync(List<ChatMessage> messages)
+        /// <param name="messages">List of messages, requiring at least 1 user message</param>
+        /// <param name="generationOptions">Optional: Custom generation options, uses .DefaultGenerationOptions if not set</param>
+        /// <param name="cancellationToken">Optional: Cancellation token to cancel the flow generation</param>
+        /// <returns>Generated instruction flow if succeeded</returns>
+        public async Task<InstructionFlow?> GenerateSolutionFlowAsync(List<ChatMessage> messages, LLMGenerationOptions? generationOptions = null, CancellationToken? cancellationToken = null)
         {
-            if (messages.Count == 0)
+            if (generationOptions == null)
+                generationOptions = DefaultGenerationOptions;
+
+            if (!messages.Any(a=>a is ChatUserMessage))
                 return null;
 
             if (messages.Last() is ChatUserMessage userMessage)
             {
-                var jsonExample = JsonUtil.GenerateExampleJson<AgentExecutionPlan>();
+                var jsonExample = JsonUtil.GetExampleJson<AgentExecutionPlan>();
 
                 var textContent = userMessage.content.FirstOrDefault(a => a is ChatMessageTextContent) as ChatMessageTextContent;
                 if (textContent != null)
                     textContent.text = $"<UserInstruction>\r\n{textContent.text}\r\n</UserInstruction>\r\n\r\nYou are in agent mode now. Above is the original user prompt. Please make a full plan for each step to do the requested action or answer the given question. Return this plan in the following JSON structure:\r\n{jsonExample}";
             }
 
+            // TODO: Magic!
 
-            var response = await GenerateStructuredResponseAsync<AgentExecutionPlan>(messages);
-            // TODO: Generate a plan (which might we expanded while running) and run through the plan.
-            // Make sure the plan also support looping through items like 'Retrieve list of chapters', 'For each chapter, summarize'
+            return null; 
 
-            // For code we want it to build up a full architecture with all classes and method names including comments.
-            //   And then (with just the meta data) generate the full code for each method one by one. 
-            //   If the AI misses a method while generating one, stop the generation and first generate the missing method, then restart the previous one.
-            return null;
+        }
+        /// <summary>
+        /// Generate a plan and go through the generated plan. This can be seen as 'Agent mode'.
+        /// </summary>
+        /// <param name="messages">List of messages, requiring at least 1 user message</param>
+        /// <returns>The last assistant response from the LLM</returns>
+        public async Task<ChatResponse?> GenerateSolutionAsync(List<ChatMessage> messages, LLMGenerationOptions? generationOptions = null, CancellationToken? cancellationToken = null)
+        {
+            if (generationOptions == null)
+                generationOptions = DefaultGenerationOptions;
+
+            if (messages.Count == 0)
+                return null;
+
+            var flow = await GenerateSolutionFlowAsync(messages, generationOptions, cancellationToken);
+            if (flow == null)
+                return null;
+
+            var response = await flow.GenerateAsync();
+
+            return null; // TODO
         }
 
         private class AgentExecutionPlan
@@ -55,5 +75,6 @@ namespace Comgenie.AI
             [Instruction("A well written concise instruction for this step")]
             public string StepInstruction { get; set; }
         }
+
     }
 }

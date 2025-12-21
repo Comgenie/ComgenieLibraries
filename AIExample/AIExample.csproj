@@ -8,6 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Comgenie.AI.Scripting\Comgenie.AI.Scripting.csproj" />
     <ProjectReference Include="..\Comgenie.AI\Comgenie.AI.csproj" />
   </ItemGroup>
 

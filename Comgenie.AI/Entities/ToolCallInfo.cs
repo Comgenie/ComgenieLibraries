@@ -18,6 +18,9 @@ namespace Comgenie.AI.Entities
         internal MethodInfo? MethodInfo { get; set; }
         [JsonIgnore]
         internal object? MethodInstance { get; set; }
+
+        [JsonIgnore]
+        public Delegate? MethodDelegate { get; set; }
     }
     public class ToolCallFunctionInfo
     {
@@ -35,6 +38,9 @@ namespace Comgenie.AI.Entities
     {
         [JsonIgnore] // Hack to make it work with the TypeDiscriminatorProperty name, otherwise it will be duplicated for some reason
         public string type { get; set; } = "string"; // string, integer, object
+
+        [JsonIgnore]
+        public string name { get; set; }
     }
     public class ToolCallObjectParameterInfo : ToolCallParameterInfo
     {

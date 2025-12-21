@@ -27,6 +27,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Comgenie.AI", "Comgenie.AI\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AIExample", "AIExample\AIExample.csproj", "{76ABBBC0-8E84-471F-A569-15192C7EFCDC}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Comgenie.AI.Scripting", "Comgenie.AI.Scripting\Comgenie.AI.Scripting.csproj", "{A70DA1AD-5CE5-4148-94F1-CCBCA4D750C8}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -65,6 +67,10 @@ Global
 		{76ABBBC0-8E84-471F-A569-15192C7EFCDC}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{76ABBBC0-8E84-471F-A569-15192C7EFCDC}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{76ABBBC0-8E84-471F-A569-15192C7EFCDC}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A70DA1AD-5CE5-4148-94F1-CCBCA4D750C8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A70DA1AD-5CE5-4148-94F1-CCBCA4D750C8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A70DA1AD-5CE5-4148-94F1-CCBCA4D750C8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A70DA1AD-5CE5-4148-94F1-CCBCA4D750C8}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

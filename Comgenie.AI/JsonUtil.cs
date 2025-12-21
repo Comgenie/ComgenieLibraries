@@ -14,12 +14,12 @@ namespace Comgenie.AI
         /// </summary>
         /// <typeparam name="T">Serializable type to generate an example structure for</typeparam>
         /// <returns>Textual representation of T showing the structure and additional instructions</returns>
-        public static string GenerateExampleJson<T>()
+        public static string GetExampleJson<T>()
         {
-            return GenerateExampleJson(typeof(T), 1);
+            return GetExampleJson(typeof(T), 1);
         }
 
-        private static string GenerateExampleJson(Type type, int level = 1)
+        private static string GetExampleJson(Type type, int level = 1)
         {
             if (level > 5)
                 return "{}"; // Prevent infinite recursion for deeply nested objects
@@ -28,7 +28,7 @@ namespace Comgenie.AI
             {
                 if (type.GetGenericArguments()[0] == typeof(string))
                     return "[ \"Result 1\", \"Result 2\", ... ]";
-                return "[ " + GenerateExampleJson(type.GetGenericArguments()[0], level) + ", ... ]";
+                return "[ " + GetExampleJson(type.GetGenericArguments()[0], level) + ", ... ]";
             }
 
             // Generate a JSON example based on the properties of the object, while looking at the AskAttribute of those properties.
@@ -54,7 +54,7 @@ namespace Comgenie.AI
                         {
                             sb.AppendLine($"{spaces}\"{prop.Name}\": [");
                             sb.AppendLine($"{spaces}  /* {askAttr.Description} */ ");
-                            sb.AppendLine($"{spaces}  {GenerateExampleJson(prop.PropertyType.GetGenericArguments()[0], level + 2)}, ...");
+                            sb.AppendLine($"{spaces}  {GetExampleJson(prop.PropertyType.GetGenericArguments()[0], level + 2)}, ...");
                             sb.AppendLine($"{spaces}],");
                         }
                     }
@@ -72,7 +72,7 @@ namespace Comgenie.AI
                     else if (prop.PropertyType.IsClass && prop.PropertyType != typeof(string))
                     {
                         // Recursive call to the GenerateExampleJson object to handle nested objects
-                        var subJson = GenerateExampleJson(prop.PropertyType, level + 1);
+                        var subJson = GetExampleJson(prop.PropertyType, level + 1);
                         sb.AppendLine($"{spaces}\"{prop.Name}\": {subJson},");
                     }
                     else

@@ -12,20 +12,18 @@ namespace Comgenie.AI
 {
     public partial class LLM
     {
-        public string PromptJson = "You are a helpful assistant that answers questions in JSON format. You are allowed to do assumptions and be creative.";
-        public string PromptScript = "You are a helpful assistant that generates javascript based on the users question and instructions. You are allowed to be creative.";
-
+        
         /// <summary>
         /// Simple method to ask a question to the AI.
         /// </summary>
         /// <param name="userMessage">Question to ask to AI</param>
         /// <returns>If succeeded, a LLM response object containing the assistant message.</returns>
-        public async Task<ChatResponse?> GenerateResponseAsync(string userMessage, double temperature = 0.7)
+        public async Task<ChatResponse?> GenerateResponseAsync(string userMessage, LLMGenerationOptions? generationOptions = null, CancellationToken? cancellationToken = null)
         {
             return await GenerateResponseAsync(new List<ChatMessage>()
             {
                 new ChatUserMessage(userMessage)
-            }, temperature);
+            }, generationOptions, cancellationToken);
         }
 
         /// <summary>
@@ -37,21 +35,24 @@ namespace Comgenie.AI
         /// <param name="temperature">Optional: Temperature. Change to make the LLM respond more creative or not.</param>
         /// <param name="addResponseToMessageList">Optional: If set to true, the given messages list will be expanded with the assistant response and if applicable: tool responses.</param>
         /// <returns>If succeeded, a LLM response object containing the assistant message.</returns>
-        public async Task<ChatResponse?> GenerateResponseAsync(List<ChatMessage> messages, double temperature = 0.7, bool addResponseToMessageList = true)
+        public async Task<ChatResponse?> GenerateResponseAsync(List<ChatMessage> messages, LLMGenerationOptions? generationOptions = null, CancellationToken? cancellationToken = null)
         {
-            if (!addResponseToMessageList)
+            if (generationOptions == null)
+                generationOptions = DefaultGenerationOptions;
+
+            if (!generationOptions.AddResponseToMessageList)
                 messages = messages.ToList(); // This prevents external message lists from getting modified
 
             ChatResponse? response = null;
             while (response == null) // Default we only do one request, but tool calls might trigger multiple requests
             {
-                response = await ExecuteCompletionRequest(messages, temperature, addResponseToMessageList: true);
+                response = await ExecuteCompletionRequest(messages, generationOptions, cancellationToken);
                 if (response == null)
                     return response; // Failed even after retries
 
                 var message = response?.choices?.FirstOrDefault()?.message;
 
-                if (message is ChatAssistantMessage assistantMessage && assistantMessage?.tool_calls != null)
+                if (generationOptions.ExecuteToolCalls && message is ChatAssistantMessage assistantMessage && assistantMessage?.tool_calls != null)
                 {
                     // Execute tool call
                     foreach (var tool in assistantMessage.tool_calls)
@@ -67,17 +68,16 @@ namespace Comgenie.AI
                         }
 
                         var functionResponse = ToolCallUtil.ExecuteFunction(toolInfo, tool.function.arguments);
-                        Console.WriteLine("[Tool call " + tool.function.name + "] " + functionResponse);
+                        Debug.WriteLine("[Tool call " + tool.function.name + "] " + functionResponse);
 
                         // Note: The assistant tool call is already added in the messages list within the ChatExecuteRequest method
-
                         messages.Add(new ChatToolMessage()
                         {
                             tool_call_id = tool.function.id,
                             content = functionResponse
                         });
 
-                        if (EnableContinuationAfterToolCall)
+                        if (generationOptions.ContinueAfterToolCalls)
                             response = null; // This automatically executes the next request
                     }
                 }
@@ -91,12 +91,12 @@ namespace Comgenie.AI
         /// <typeparam name="T">Type of an class with Instruction attributes helping the AI to populate the fields</typeparam>
         /// <param name="userMessage">Question to ask to AI</param>
         /// <returns>An instance of T with the populated fields</returns>
-        public async Task<T?> GenerateStructuredResponseAsync<T>(string userMessage)
+        public async Task<T?> GenerateStructuredResponseAsync<T>(string userMessage, LLMGenerationOptions? generationOptions = null, CancellationToken? cancellationToken = null)
         {
             return await GenerateStructuredResponseAsync<T>(new List<ChatMessage>()
             {
                 new ChatUserMessage(userMessage)
-            });
+            }, true, generationOptions, cancellationToken);
         }
 
         /// <summary>
@@ -104,30 +104,25 @@ namespace Comgenie.AI
         /// This method allows you to provide a list of messages which will be used to generate a response, and which will be updated to store the raw response so it can be used to ask a follow up question.
         /// </summary>
         /// <typeparam name="T">Type of an class with Instruction attributes helping the AI to populate the fields</typeparam>
-        /// <param name="prompt">Question to ask to AI</param>
-        /// <param name="messages">A list which will be used for both input as adding the AI response to. If this list is empty, the required system message will be added automatically. Note that the users question is always automatically added to this list.</param>
+        /// <param name="messages">A list which will be used for both input as adding the AI response to. If this list is empty, the required system message will be added automatically.</param>
+        /// <param name="includeInstructionAndExampleJson">If set to true, an explanation of the JSON structure of T will be injected in the last user message.</param>
+        /// <param name="generationOptions">Optional: Options to control the LLM generation and behaviour within this method. If not set the .DefaultGenerationOptions is used.</param>
         /// <returns>An instance of T with the populated fields</returns>
-        public async Task<T?> GenerateStructuredResponseAsync<T>(List<ChatMessage> messages, double temperature = 0.7, bool includeInstructionAndExampleJson = true)
+        public async Task<T?> GenerateStructuredResponseAsync<T>(List<ChatMessage> messages, bool includeInstructionAndExampleJson = true, LLMGenerationOptions? generationOptions = null, CancellationToken? cancellationToken = null)
         {
-            if (messages == null)
-                messages = new List<ChatMessage>();
-
-            if (messages.Count == 0)
-                messages.Add(new ChatSystemMessage(PromptJson));
-
             if (includeInstructionAndExampleJson)
             {
-                var jsonExample = JsonUtil.GenerateExampleJson<T>();
+                var jsonExample = JsonUtil.GetExampleJson<T>();
 
                 if (messages.Last() is ChatUserMessage userMessage)
                 {
                     var textContent = userMessage.content.FirstOrDefault(a => a is ChatMessageTextContent) as ChatMessageTextContent;
                     if (textContent != null)
-                        textContent.text += $"\r\n\r\nAnswer using the following JSON format:\n\n{jsonExample}";
+                        textContent.text += $"\r\n\r\nAnswer to this instruction using the following JSON format:\n\n{jsonExample}";
                 }
             }
 
-            var chat = await GenerateResponseAsync(messages, temperature, addResponseToMessageList: true);
+            var chat = await GenerateResponseAsync(messages, generationOptions, cancellationToken);
 
             if (chat == null || chat.choices == null || chat.choices.Count == 0)
                 throw new Exception("No response from AI");
@@ -140,32 +135,6 @@ namespace Comgenie.AI
             return chat.LastAsJsonObject<T>();
         }
 
-        /// <summary>
-        /// Generate a script based on the given messages and return the script as string. 
-        /// </summary>
-        /// <param name="messages">List of at least 1 message ending with a user message.</param>
-        /// <param name="temperature">Optional: Temperature. Change to make the LLM respond more creative or not.</param>
-        /// <param name="addResponseToMessageList">Optional: If set to true, the given messages list will be expanded with the assistant response and if applicable: tool responses.</param>
-        /// <returns>String containing the requested script.</returns>
-        public async Task<string> GenerateScriptAsync(List<ChatMessage> messages, double temperature = 0.7, bool addResponseToMessageList = true)
-        {
-            if (messages == null)
-                messages = new List<ChatMessage>();
-
-            if (messages.Count == 0)
-            {
-                messages.Add(new ChatSystemMessage(PromptScript));
-            }
-
-            var chat = await GenerateResponseAsync(messages, temperature, addResponseToMessageList);
-
-            if (chat == null || chat.choices == null || chat.choices.Count == 0)
-                throw new Exception("No response from AI");
-
-            // TODO: Strip any script formatting tags
-
-            return chat.LastAsString() ?? string.Empty;
-        }
 
         /// <summary>
         /// Send a completion request with the given chat messages as payload.
@@ -173,17 +142,19 @@ namespace Comgenie.AI
         /// This method will not execute or handle tool calls, use GenerateResponseAsync for that.
         /// </summary>
         /// <param name="messages">List of at least 1 message.</param>
-        /// <param name="temperature">Optional: Temperature. Change to make the LLM respond more creative or not.</param>
-        /// <param name="addResponseToMessageList">Optional: If set to true, the given messages list will be expanded with the assistant response and if applicable: tool responses.</param>
+        /// <param name="generationOptions">Optional: Options to control the LLM generation and behaviour within this method. If not set the .DefaultGenerationOptions is used.</param>
         /// <returns>If succeeded, a LLM response object containing the assistant message.</returns>
-        private async Task<ChatResponse?> ExecuteCompletionRequest(List<ChatMessage> messages, double temperature = 0.7, bool addResponseToMessageList = true)
+        private async Task<ChatResponse?> ExecuteCompletionRequest(List<ChatMessage> messages, LLMGenerationOptions? generationOptions = null, CancellationToken? cancellationToken = null)
         {
-            if (DocumentVectorDB != null && DocumentAutomaticInclusionMode != DocumentReferencingMode.None && messages.Last() is ChatUserMessage userMessage)
+            if (generationOptions == null)
+                generationOptions = DefaultGenerationOptions;
+
+            if (DocumentVectorDB != null && generationOptions.DocumentReferencingMode != DocumentReferencingMode.None && messages.Last() is ChatUserMessage userMessage)
             {
                 var textContent = userMessage.content.FirstOrDefault(a => a is ChatMessageTextContent) as ChatMessageTextContent;
                 if (textContent != null)
                 {
-                    if (DocumentAutomaticInclusionMode == DocumentReferencingMode.FunctionCall)
+                    if (generationOptions.DocumentReferencingMode == DocumentReferencingMode.FunctionCallDocuments)
                     {
                         if (!Tools.Any(a => a.Function?.Name == "retrieve_documents"))
                             AddToolCall(retrieve_documents);
@@ -191,24 +162,33 @@ namespace Comgenie.AI
                         textContent.text = $"Note: There are {DocumentVectorDB.Documents.Count} documents attached to this conversation. Use the 'retrieve_documents' function to search through them."
                             + "\r\n\r\n" + textContent.text;
                     }
+                    else if (generationOptions.DocumentReferencingMode == DocumentReferencingMode.FunctionCallCode)
+                    {
+                        if (!Tools.Any(a => a.Function?.Name == "retrieve_code"))
+                            AddToolCall(retrieve_code);
+
+                        textContent.text = $"Note: There are {DocumentVectorDB.Documents.Count} code files/documents attached to this conversation. Use the 'retrieve_documents' function to search through them."
+                            + "\r\n\r\n" + textContent.text;
+                    }
                     else
                     {
-                        var summary = await GenerateRelatedDocumentsSummaryAsync(textContent.text);
+                        var summary = await GenerateRelatedDocumentsSummaryAsync(textContent.text, generationOptions, cancellationToken);
                         textContent.text = "Here are the related passages in the attached documents based on the user's last message:\r\n" + summary + "\r\n\r\n" + textContent.text;
                     }
                 }
             } 
 
             if (MaxContentLength.HasValue)
-                TrimOldMessages(messages, MaxContentLength.Value);
+                TrimOldMessages(messages, MaxContentLength.Value - 1000); // Space for response
 
             var completionRequest = new
             {
                 model = ActiveModel.Name,
-                temperature = temperature,
+                temperature = generationOptions.Temperature,
                 messages = messages,
-                tools = Tools,
-                tool_choice = "auto"
+                tools = generationOptions.IncludeAvailableTools ? Tools : new(),
+                tool_choice = "auto",
+                stop = generationOptions.StopEarlyTextSequences
             };
 
             var txtContent = JsonSerializer.Serialize(completionRequest, new JsonSerializerOptions()
@@ -219,7 +199,7 @@ namespace Comgenie.AI
             });
 
             // Check if the response is cached
-            if (ExistsInCacheHandler != null && this.ReadFromCacheHandler != null)
+            if (generationOptions.UseCacheIfAvailable && ExistsInCacheHandler != null && this.ReadFromCacheHandler != null)
             {
                 var cacheKey = CalculateHash(txtContent);
                 if (ExistsInCacheHandler(cacheKey))
@@ -234,6 +214,9 @@ namespace Comgenie.AI
             var first = true;
             while (first || CurrentRequestsSecond >= MaxRequestsPerSecond || CurrentRequestsMinute >= MaxRequestsPerMinute)
             {
+                if (cancellationToken.HasValue)
+                    cancellationToken.Value.ThrowIfCancellationRequested();
+
                 var cur = DateTime.UtcNow;
                 if (cur.Second != LastRequest.Second)
                     CurrentRequestsSecond = 0;
@@ -250,16 +233,16 @@ namespace Comgenie.AI
 
             var content = new StringContent(txtContent, Encoding.UTF8, "application/json");
 
-            return await ExecuteAndRetryHttpRequestIfFailed<ChatResponse>(async httpClient =>
+            return await ExecuteAndRetryHttpRequestIfFailedAsync<ChatResponse>(async (httpClient, requestCancellationToken) =>
             {
                 Debug.WriteLine("Executing request to " + ActiveModel.ApiUrlCompletions + ", Content length: " + content.Headers.ContentLength);
-                var resp = await httpClient.PostAsync(ActiveModel.ApiUrlCompletions, content);
+                var resp = await httpClient.PostAsync(ActiveModel.ApiUrlCompletions, content, requestCancellationToken);
 
                 Debug.WriteLine($"Received {resp.StatusCode}");
 
                 resp.EnsureSuccessStatusCode(); // Should also take care of the token rate limit exceeded error
 
-                var str = await resp.Content.ReadAsStringAsync();
+                var str = await resp.Content.ReadAsStringAsync(requestCancellationToken);
 
                 if (!str.StartsWith("{"))
                     throw new Exception("Invalid LLM response: " + str);
@@ -275,21 +258,34 @@ namespace Comgenie.AI
                     var cost = ((double)deserialized.usage.prompt_tokens * ActiveModel.CostPromptToken) +
                         ((double)deserialized.usage.completion_tokens * ActiveModel.CostCompletionToken);
                     CostThisSession += cost;
+
                     Debug.WriteLine($"Cost this session: {CostThisSession} (prompt: {deserialized.usage.prompt_tokens}, completion: {deserialized.usage.completion_tokens})");
                 }
 
-                if (UpdateCacheHandler != null)
+                if (generationOptions.UseCacheIfAvailable && UpdateCacheHandler != null)
                 {
                     var cacheKey = CalculateHash(txtContent);
                     UpdateCacheHandler(cacheKey, str);
                 }
 
-                if (addResponseToMessageList)
-                    messages.Add(deserialized.choices[0].message);
+                if (generationOptions.AddResponseToMessageList)
+                {
+                    if (messages.Count > 0 && messages.Last() is ChatAssistantMessage lastAssistantMessage && deserialized.choices[0].message is ChatAssistantMessage newAssistantMessage)
+                    {
+                        // If we've provided the initial answer, then we will add the rest to the same message
+                        lastAssistantMessage.content += newAssistantMessage.content;
+
+                        if (generationOptions.StopEarlyTextSequences != null && generationOptions.StopEarlyTextSequences.Length == 1)
+                            lastAssistantMessage.content += generationOptions.StopEarlyTextSequences[0];
+                    }
+                    else
+                    {
+                        messages.Add(deserialized.choices[0].message);
+                    }
+                }
 
                 return deserialized;
-            });
-            
+            }, generationOptions.FailedRequestRetryCount, cancellationToken);
         }
 
         /// <summary>
@@ -342,7 +338,9 @@ namespace Comgenie.AI
                 if (messageToRemove == null)
                     break; // Nothing to remove anymore
                 removedMessageCount++;
-                messages.Remove(messageToRemove.Value.Item1);
+                messageToToken.Remove(messageToRemove);
+                if (!messages.Remove(messageToRemove.Value.Item1))
+                    break;
             }
 
             return removedMessageCount;

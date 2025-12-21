@@ -52,7 +52,7 @@ namespace Comgenie.AI
             return JsonSerializer.Serialize(infos, options);
         }
 
-        public static ToolCallInfo BuildToolCallInfoFromMethod(MethodInfo method, object? methodInstance)
+        public static ToolCallInfo BuildToolCallInfoFromMethod(MethodInfo method, object? methodInstance, Delegate? methodDelegate=null)
         {
             var methodAttr = method.GetCustomAttribute<ToolCallAttribute>();
 
@@ -66,7 +66,8 @@ namespace Comgenie.AI
                     Parameters = new ToolCallObjectParameterInfo()
                 },
                 MethodInfo = method,
-                MethodInstance = methodInstance
+                MethodInstance = methodInstance,
+                MethodDelegate = methodDelegate
             };
             
             
@@ -82,6 +83,7 @@ namespace Comgenie.AI
                 {
                     mapped = new ToolCallStringFieldParameterInfo { type = "string", Description = paramAttr?.Description ?? string.Empty };
                 }
+                mapped.name = param.Name;
 
                 root.Properties[param.Name] = mapped;
 
@@ -200,7 +202,7 @@ namespace Comgenie.AI
                     var mapped = MapTypeToParameterInfo(p.PropertyType, propAttr);
                     if (mapped == null)
                         mapped = new ToolCallStringFieldParameterInfo { type = "string", Description = propAttr?.Description };
-
+                    mapped.name = p.Name;
                     obj.Properties[p.Name] = mapped;
 
                     // Simple required heuristic: non-nullable value types are required
@@ -325,6 +327,7 @@ namespace Comgenie.AI
             }
 
             // Async handling: Task or Task<T>
+            // TODO: If a 'cancellationToken'  parameter is set, we want to pass ours through
             if (typeof(System.Threading.Tasks.Task).IsAssignableFrom(method.ReturnType))
             {
                 if (invocationResult == null)

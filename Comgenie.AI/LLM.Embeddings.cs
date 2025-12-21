@@ -18,11 +18,7 @@ namespace Comgenie.AI
     public partial class LLM
     {
         private DocumentVectorDB? DocumentVectorDB { get; set; }
-        public DocumentReferencingMode DocumentAutomaticInclusionMode { get; set; } = DocumentReferencingMode.FunctionCall;
-       
-        public int DocumentAutomaticIncludingCombineCloseCharacterCount { get; set; } = 50;
-        public int DocumentAutomaticIncludingExpandCharacterCount { get; set; } = 50;
-        public int DocumentAutomaticIncludingMaxSize { get; set; } = 1024;
+        
 
         public int DocumentChunkCharacterCount { get; set; } = 200;
         public int DocumentOverlappingCharacterCount { get; set; } = 100;
@@ -35,7 +31,7 @@ namespace Comgenie.AI
         /// <param name="documentText">Full text representation of the document</param>
         /// <param name="mode">Strategy to create searchable embeddings for the vector database</param>
         /// <returns>Task as it will have to communicate with the LLM to generate embeddings.</returns>
-        public async Task AddDocument(string documentName, string documentText, DocumentEmbedMode mode = DocumentEmbedMode.AsIs)
+        public async Task AddDocument(string documentName, string documentText, DocumentEmbedMode mode = DocumentEmbedMode.Overlapping)
         {
             if (DocumentVectorDB == null)
             {
@@ -78,6 +74,10 @@ namespace Comgenie.AI
                     var length = Math.Min(chunkSize, documentText.Length - i);
                     await GenerateEmbeddingsAndAddDocumentSection(document, i, length);
                 }
+            }
+            else if (mode == DocumentEmbedMode.DontEmbed)
+            {
+                return; // Don't embed in prompt. Used for actions like deep dive.
             }
             else
             {
@@ -270,14 +270,17 @@ namespace Comgenie.AI
         /// <param name="chunkSize">Max number of characters of the document to pass to the LLM at once.</param>
         /// <returns>The textual summarized response from the LLM.</returns>
         /// <exception cref="Exception">An exception will be thrown if communication with the LLM fails.</exception>
-        public async Task<string> GenerateDeepDiveDocumentsResponseAsync(string text, int chunkSize=4096)
+        public async Task<string> GenerateDeepDiveDocumentsResponseAsync(string text, int chunkSize=4096, int overlappingSize = 100, LLMGenerationOptions? generationOptions = null, CancellationToken? cancellationToken = null)
         {
             if (DocumentVectorDB == null)
                 return "";
+            if (generationOptions == null)
+                generationOptions = DefaultGenerationOptions;
 
-            var origAutomaticPromptInclusing = DocumentAutomaticInclusionMode;
+            generationOptions = generationOptions.Clone(); // Copy so we can modify the settings safely
 
-            DocumentAutomaticInclusionMode = DocumentReferencingMode.None;
+            generationOptions.DocumentReferencingMode = DocumentReferencingMode.None;
+
             // This will scan through the documents, section by section, using multiple requests
             // The LLM will try manually find all relevant information in the text and 'answer' the text using that
             // All answers will be combined and then rewritten to provide a good full deep-dive answer
@@ -287,16 +290,19 @@ namespace Comgenie.AI
             StringBuilder sb = new StringBuilder();
             foreach (var document in DocumentVectorDB.Documents)
             {
-                for (var i=0;i < document.Value.Text.Length; i += chunkSize)
-                {                    
+                for (var i=0;i < document.Value.Text.Length; i += (chunkSize - overlappingSize))
+                {
+                    if (cancellationToken.HasValue)
+                        cancellationToken.Value.ThrowIfCancellationRequested();
+
                     var chunk = (i + chunkSize > document.Value.Text.Length) ?
                         document.Value.Text.Substring(i) :
                         document.Value.Text.Substring(i, chunkSize);
 
-                    var prompt = GenerateRelatedDocumentSnippit(1, i, chunk.Length, chunk, document.Value.SourceName, document.Value.Text, DocumentAutomaticInclusionMode) + "\r\n\r\n" +
+                    var prompt = GetRelatedDocumentSnippit(1, i, chunk.Length, chunk, document.Value.SourceName, document.Value.Text, generationOptions.DocumentReferencingMode) + "\r\n\r\n" +
                         $"<UserInstruction>{CleanXmlValue(text)}</UserInstruction>\r\n\r\n" + PromptDeepDive;
 
-                    var chunkResponse = await GenerateResponseAsync(prompt);
+                    var chunkResponse = await GenerateResponseAsync(prompt, generationOptions, cancellationToken);
                     if (chunkResponse == null)
                         throw new Exception("Could not get LLM response");
 
@@ -312,13 +318,11 @@ namespace Comgenie.AI
             var promptSummarize = $"<DeepDiveResult>{CleanXmlValue(sb.ToString())}</DeepDiveResult>\r\n\r\n" + 
                 $"<UserInstruction>{CleanXmlValue(text)}</UserInstruction>\r\n\r\n" + PromptDeepDiveSummarize;
 
-            var summarizeResponse = await GenerateResponseAsync(promptSummarize);
+            var summarizeResponse = await GenerateResponseAsync(promptSummarize, generationOptions, cancellationToken);
             if (summarizeResponse == null)
                 throw new Exception("Could not get LLM response");
 
-            DocumentAutomaticInclusionMode = origAutomaticPromptInclusing;
-
-            return summarizeResponse.LastAsString() ?? "";            
+            return summarizeResponse.LastAsString() ?? "";  
         }
         private static string CleanXmlValue(string text)
         {
@@ -330,41 +334,47 @@ namespace Comgenie.AI
         /// If there is more than one matching result, the most relevant ones will be combined until the maxSize is reached.
         /// </summary>
         /// <param name="text">Text to find related documents for</param>
-        /// <param name="maxSize">A number of characters to limit the response to.</param>
-        /// <param name="expandCharacterCount">Include extra text before/after the found result. This might get ignored for the last result or if the maxSize is set to a low number.</param>
-        /// <param name="combineCloseCharacterCount">Combine results not overlapping but near this amount of characters from each other. This might get ignored if the maxSize is set to a low number.</param>
-        /// <returns>A html-like formatted string with the found documents. This includes their document name, offset within the document and text from the document.</returns>
-        public async Task<string> GenerateRelatedDocumentsSummaryAsync(string text, int maxSize=1024, int expandCharacterCount=0, int combineCloseCharacterCount = 50, DocumentReferencingMode format = DocumentReferencingMode.Json)
+        /// <param name="generationOptions">Options to control the format and length of the text generated to reference the documents.</param>
+        /// <returns>A formatted string with the found documents. This includes their document name, offset within the document and text from the document.</returns>
+        public async Task<string> GenerateRelatedDocumentsSummaryAsync(string text, LLMGenerationOptions? generationOptions = null, CancellationToken? cancellationToken = null)
         {
+            if (generationOptions == null)
+                generationOptions = DefaultGenerationOptions;
+
             if (DocumentVectorDB == null)
                 return ""; // No document added means no summary
 
+            // TODO: If we found our given text exactly within one of the documents, we want to prefer that
+
             // Get the most matching documents using embeddings and then rank them. 
-            var embedding = await GenerateEmbeddingsAsync(text);
+            var embedding = await GenerateEmbeddingsAsync(text, generationOptions, cancellationToken);
             var results = DocumentVectorDB.Search(embedding, 50);
-            results = await GenerateRankingsAsync(text, results.Select(r => r.Item).ToList(), top_n: 10);
+            results = await GenerateRankingsAsync(text, results.Select(r => r.Item).ToList(), top_n: 10, generationOptions, cancellationToken);
 
             // Combine multiple found results within the same file if they are close to each other.            
-            var combinedResults = DocumentVectorDB.CombineCloseResults(results, combineCloseCharacterCount);
+            var combinedResults = DocumentVectorDB.CombineCloseResults(results, generationOptions.DocumentReferencingCombineCloseCharacterCount);
 
-            if (combinedResults.Any(a=>a.Item.Length > maxSize)) // When combining results including nearby results, we might exceed max size, so revert to just overlapping results
+            if (combinedResults.Any(a=>a.Item.Length > generationOptions.DocumentReferencingMaxSize)) // When combining results including nearby results, we might exceed max size, so revert to just overlapping results
                 combinedResults = DocumentVectorDB.CombineCloseResults(results, 0);
 
-            if (combinedResults.Any(a => a.Item.Length > maxSize)) // When combining just the overlapping results, we still might exceed max size, so revert to non-combined results
+            if (combinedResults.Any(a => a.Item.Length > generationOptions.DocumentReferencingMaxSize)) // When combining just the overlapping results, we still might exceed max size, so revert to non-combined results
                 combinedResults = results;
 
             results = combinedResults.OrderByDescending(a => a.Score).ToList();
+
+            if (results.Count == 0)
+                return ""; // No results
 
             // Finally, combine them in a text string which can be used within a prompt, continue until max size is reached.
 
             var documents = new List<object>();
 
             var sb = new StringBuilder();
-            if (format == DocumentReferencingMode.XML)
+            if (generationOptions.DocumentReferencingMode == DocumentReferencingMode.XML)
             {
                 sb.AppendLine("<documents>");
             }
-            else if (format == DocumentReferencingMode.Json)
+            else if (generationOptions.DocumentReferencingMode == DocumentReferencingMode.Json)
             {
 //                sb.AppendLine("```json");
                 sb.AppendLine("[");
@@ -379,27 +389,26 @@ namespace Comgenie.AI
                 var length = result.Item.Length;
 
                 index++;
-                var textToAddShort = GenerateRelatedDocumentSnippit(index, start, length, relatedText.ToString(), result.Item.Source.SourceName, result.Item.Source.Text, format);
+                var textToAddShort = GetRelatedDocumentSnippit(index, start, length, relatedText.ToString(), result.Item.Source.SourceName, result.Item.Source.Text, generationOptions.DocumentReferencingMode);
 
-                if (expandCharacterCount > 0)
+                if (generationOptions.DocumentReferencingExpandBeforeCharacterCount > 0 || generationOptions.DocumentReferencingExpandAfterCharacterCount > 0)
                 {
                     // Expand the text a bit to provide more context
-                    start = Math.Max(0, result.Item.Offset - expandCharacterCount);
-                    var end = Math.Min(result.Item.Source.Text.Length, result.Item.Offset + result.Item.Length + expandCharacterCount);
+                    start = Math.Max(0, result.Item.Offset - generationOptions.DocumentReferencingExpandBeforeCharacterCount);
+                    var end = Math.Min(result.Item.Source.Text.Length, result.Item.Offset + result.Item.Length + generationOptions.DocumentReferencingExpandAfterCharacterCount);
                     length = end - start;
 
                     // TODO: Nudge the start/end to the nearest space or even nearest sentence endings.
-
                     relatedText = result.Item.Source.Text.AsMemory(start, length);
                 }
 
-                var textToAdd = GenerateRelatedDocumentSnippit(index, start, length, relatedText.ToString(), result.Item.Source.SourceName, result.Item.Source.Text, format);
+                var textToAdd = GetRelatedDocumentSnippit(index, start, length, relatedText.ToString(), result.Item.Source.SourceName, result.Item.Source.Text, generationOptions.DocumentReferencingMode);
 
-                if (sb.Length + textToAdd.Length + 21 > maxSize) // Exceeding max size with the long text, try adding the short version
+                if (sb.Length + textToAdd.Length + 21 > generationOptions.DocumentReferencingMaxSize) // Exceeding max size with the long text, try adding the short version
                 {
-                    if (sb.Length + textToAddShort.Length + 21 <= maxSize) // Fits with the short version
+                    if (sb.Length + textToAddShort.Length + 21 <= generationOptions.DocumentReferencingMaxSize) // Fits with the short version
                     {
-                        if (format == DocumentReferencingMode.Json && index > 1)
+                        if (generationOptions.DocumentReferencingMode == DocumentReferencingMode.Json && index > 1)
                             sb.Append(",");
                         sb.AppendLine(textToAddShort);
                         sb.AppendLine();
@@ -407,17 +416,17 @@ namespace Comgenie.AI
                     break;
                 }
 
-                if (format == DocumentReferencingMode.Json && index > 1)
+                if (generationOptions.DocumentReferencingMode == DocumentReferencingMode.Json && index > 1)
                     sb.Append(",");
                 sb.AppendLine(textToAdd);
                 sb.AppendLine();
             }
 
-            if (format == DocumentReferencingMode.XML)
+            if (generationOptions.DocumentReferencingMode == DocumentReferencingMode.XML)
             {
                 sb.AppendLine("</documents>");
             }
-            else if (format == DocumentReferencingMode.Json)
+            else if (generationOptions.DocumentReferencingMode == DocumentReferencingMode.Json)
             {
                 sb.AppendLine("]");
                 //sb.AppendLine("```");
@@ -425,7 +434,7 @@ namespace Comgenie.AI
 
             return sb.ToString();
         }
-        private static string GenerateRelatedDocumentSnippit(int index, long offset, long length, string relatedText, string sourceName, string sourceText, DocumentReferencingMode format)
+        private static string GetRelatedDocumentSnippit(int index, long offset, long length, string relatedText, string sourceName, string sourceText, DocumentReferencingMode format)
         {
             if (offset > 0)
                 relatedText = "[...] " + relatedText;
@@ -460,25 +469,17 @@ namespace Comgenie.AI
         }
 
         /// <summary>
-        /// Generate a summary of related documents from the vector database based on the given text.
-        /// This method uses the DocumentAutomaticIncluding* settings defined within this object.
-        /// </summary>
-        /// <param name="text">Text to find related documents for</param>
-        /// <returns>A html-like formatted string with the found documents. This includes their document name, offset within the document and text from the document.</returns>
-        public Task<string> GenerateRelatedDocumentsSummaryAsync(string text)
-        {
-            return GenerateRelatedDocumentsSummaryAsync(text, DocumentAutomaticIncludingMaxSize, DocumentAutomaticIncludingExpandCharacterCount, DocumentAutomaticIncludingCombineCloseCharacterCount, DocumentAutomaticInclusionMode);
-        }
-
-        /// <summary>
         /// Do a call to the embeddings endpoint to generate embeddings for the given text.
         /// Note that the number of floats returned depends on the model used. 
         /// When using llama-server, make sure the --embeddings and --pooling arguments are set, recommended arguments: --embeddings --pooling mean 
         /// </summary>
         /// <param name="text">Text to get embeddings from</param>
         /// <returns>Float array representing the embedding</returns>
-        public async Task<float[]> GenerateEmbeddingsAsync(string text)
-        {            
+        public async Task<float[]> GenerateEmbeddingsAsync(string text, LLMGenerationOptions? generationOptions = null, CancellationToken? cancellationToken=null)
+        {
+            if (generationOptions == null)
+                generationOptions = DefaultGenerationOptions;
+
             var embeddingsRequest = new
             {
                 input = text,
@@ -494,12 +495,12 @@ namespace Comgenie.AI
             });
             var content = new StringContent(txtContent, Encoding.UTF8, "application/json");
 
-            var deserialized = await ExecuteAndRetryHttpRequestIfFailed<EmbeddingsResponse>(async httpClient =>
+            var deserialized = await ExecuteAndRetryHttpRequestIfFailedAsync<EmbeddingsResponse>(async (httpClient, requestCancellationToken) =>
             {
-                var resp = await httpClient.PostAsync(ActiveModel.ApiUrlEmbeddings, content);
+                var resp = await httpClient.PostAsync(ActiveModel.ApiUrlEmbeddings, content, requestCancellationToken);
                 resp.EnsureSuccessStatusCode();
 
-                var str = await resp.Content.ReadAsStringAsync();
+                var str = await resp.Content.ReadAsStringAsync(requestCancellationToken);
                 if (!str.StartsWith("{"))
                     throw new Exception("Invalid LLM response: " + str);
 
@@ -508,7 +509,7 @@ namespace Comgenie.AI
                     throw new Exception("Failed to deserialize LLM response: " + str);
 
                 return embeddingsResponse;
-            });
+            }, generationOptions.FailedRequestRetryCount, cancellationToken);
             return deserialized!.data.First().embedding;
             // {"model":"llama-cpp","object":"list","usage":{"prompt_tokens":6,"total_tokens":6},"data":[{"embedding":[0.007257496938109398,0.001204345258884132, 
         }
@@ -523,8 +524,11 @@ namespace Comgenie.AI
         /// <param name="text">The text to find relevance from</param>
         /// <param name="items">List of documents/items to rank. Note that the .ToString() method will be called for each of these items to find out what text it represents.</param>
         /// <returns>List of scored items with their relevance score</returns>
-        public async Task<List<ScoredItem<T>>> GenerateRankingsAsync<T>(string text, List<T> items, int top_n=10)
-        {            
+        public async Task<List<ScoredItem<T>>> GenerateRankingsAsync<T>(string text, List<T> items, int top_n=10, LLMGenerationOptions? generationOptions = null, CancellationToken? cancellationToken = null)
+        {
+            if (generationOptions == null)
+                generationOptions = DefaultGenerationOptions;
+
             // TODO: Split requests exceeding x tokens across multiple requests and combine them using the score.
 
             var embeddingsRequest = new
@@ -543,12 +547,12 @@ namespace Comgenie.AI
             });
             var content = new StringContent(txtContent, Encoding.UTF8, "application/json");
 
-            var results = await ExecuteAndRetryHttpRequestIfFailed(async httpClient =>
+            var results = await ExecuteAndRetryHttpRequestIfFailedAsync(async (httpClient, requestCancellationToken) =>
             {
-                var resp = await httpClient.PostAsync(ActiveModel.ApiUrlReranking, content);
+                var resp = await httpClient.PostAsync(ActiveModel.ApiUrlReranking, content, requestCancellationToken);
                 resp.EnsureSuccessStatusCode();
 
-                var str = await resp.Content.ReadAsStringAsync();
+                var str = await resp.Content.ReadAsStringAsync(requestCancellationToken);
                 if (!str.StartsWith("{"))
                     throw new Exception("Invalid LLM response: " + str);
 
@@ -566,15 +570,15 @@ namespace Comgenie.AI
                     });
                 }
                 return results.OrderByDescending(a => a.Score).ToList();
-            });
+            }, generationOptions.FailedRequestRetryCount, cancellationToken);
             
             return results;
         }
 
         // Extra helper to work with simple string documents directly
-        public Task<List<ScoredItem<string>>> GenerateRankingsAsync(string text, List<string> documents, int top_n = 10)
+        public Task<List<ScoredItem<string>>> GenerateRankingsAsync(string text, List<string> documents, int top_n = 10, LLMGenerationOptions? generationOptions = null, CancellationToken? cancellationToken = null)
         {
-            return GenerateRankingsAsync<string>(text, documents, top_n);
+            return GenerateRankingsAsync<string>(text, documents, top_n, generationOptions, cancellationToken);
         }
 
 
@@ -585,13 +589,34 @@ namespace Comgenie.AI
             if (DocumentVectorDB == null)
                 return new RetrieveDocumentsResult();
 
-            var json = await GenerateRelatedDocumentsSummaryAsync(query, DocumentAutomaticIncludingMaxSize, DocumentAutomaticIncludingExpandCharacterCount, DocumentAutomaticIncludingCombineCloseCharacterCount, DocumentReferencingMode.Json);
+            var generationOptions = DefaultGenerationOptions.Clone();
+            generationOptions.DocumentReferencingMode = DocumentReferencingMode.Json;
+
+            var json = await GenerateRelatedDocumentsSummaryAsync(query, generationOptions);
             var items = JsonSerializer.Deserialize<List<RelatedDocumentItem>>(json);
             return new RetrieveDocumentsResult()
             {
                 results = items ?? new()
             };
             
+        }
+
+        [ToolCall("Search in the attached code files based on the given text (uses embedding, vector db search)")]
+        private async Task<RetrieveDocumentsResult> retrieve_code([ToolCall("A piece of code like a method declaration found within the code", Required = true)] string query)
+        {
+            // TODO: Code specific syntax tricks to more easily return just a single method body etc.
+
+            Console.WriteLine("Retrieve code files called with text: " + query);
+            if (DocumentVectorDB == null)
+                return new RetrieveDocumentsResult();
+
+            var json = await GenerateRelatedDocumentsSummaryAsync(query, DefaultGenerationOptions);
+            var items = JsonSerializer.Deserialize<List<RelatedDocumentItem>>(json);
+
+            return new RetrieveDocumentsResult()
+            {
+                results = items ?? new()
+            };
         }
         private class RetrieveDocumentsResult
         {
@@ -611,15 +636,17 @@ namespace Comgenie.AI
             AsIs = 0,
             SplitSentence = 1,
             Overlapping = 2,
+            DontEmbed = 3
         }
 
         public enum DocumentReferencingMode
         {
             None = 0,
-            FunctionCall = 1,
-            Json = 2,
-            XML = 3,
-            Markdown = 4
+            FunctionCallDocuments = 1,
+            FunctionCallCode = 2,
+            Json = 3,
+            XML = 4,
+            Markdown = 5
         }
     }
 }
