@@ -16,9 +16,9 @@ namespace Comgenie.AI
         /// Temperature when generating a response from the LLM model.
         /// A lower number will keep responses very stable and focussed.
         /// A higher number 1.0 or higher will introduce more randomness and cause weirder but more creative responses.
-        /// A balanced 0.7 is set as default.
+        /// Some models only support 1.0 so that is set as default.
         /// </summary>
-        public float Temperature { get; set; } = 0.7f;
+        public float Temperature { get; set; } = 1f;
 
         /// <summary>
         /// When set to true (default) any LLM response will be added to the list instance passed into the Generate-methods.
