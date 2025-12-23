@@ -247,7 +247,10 @@ namespace Comgenie.AI
                 if (!str.StartsWith("{"))
                     throw new Exception("Invalid LLM response: " + str);
 
-                var deserialized = JsonSerializer.Deserialize<ChatResponse>(str);
+                var deserialized = JsonSerializer.Deserialize<ChatResponse>(str, new JsonSerializerOptions()
+                {
+                    AllowOutOfOrderMetadataProperties = true // OpenAI places the 'role' property at the end of the object
+                });
 
                 if (deserialized?.choices == null || deserialized.choices.Count == 0 || deserialized.choices[0].message == null)
                     throw new Exception("No choices in response: " + str);

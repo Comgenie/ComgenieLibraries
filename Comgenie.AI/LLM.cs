@@ -46,13 +46,19 @@ namespace Comgenie.AI
             {
                 var url = new Uri(model.ApiUrlCompletions);
                 var httpClient = GetHttpClient();
-                
-                var settings = await httpClient.GetFromJsonAsync<LlamaCppProps>(url.Scheme + "://"+ url.Authority + "/props");
-                if (settings != null)
+                try
                 {
-                    // Set limits based on current model/server info
-                    if (settings.default_generation_settings.n_ctx.HasValue && settings.default_generation_settings.n_ctx.Value > 0)
-                        MaxContentLength = settings.default_generation_settings.n_ctx.Value;
+                    var settings = await httpClient.GetFromJsonAsync<LlamaCppProps>(url.Scheme + "://" + url.Authority + "/props");
+                    if (settings != null)
+                    {
+                        // Set limits based on current model/server info
+                        if (settings.default_generation_settings.n_ctx.HasValue && settings.default_generation_settings.n_ctx.Value > 0)
+                            MaxContentLength = settings.default_generation_settings.n_ctx.Value;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine("Could not retrieve context length from /props endpoint. " + ex.Message);
                 }
             }
             
