@@ -23,7 +23,7 @@ namespace Comgenie.AI
         /// <param name="messages">List of at least 1 message ending with a user message. Note, this method will always expand this message list.</param>
         /// <param name="interactiveGeneration">Inject console log and statement outputs into the generated javascript to help the assistant during generation. Note that this executes the statements directly using Jint.</param>
         /// <returns>String containing the requested script.</returns>
-        public static async Task<string> GenerateScriptAsync(this LLM llm, List<ChatMessage> messages, bool interactiveGeneration=false, LLMGenerationOptions? generationOptions = null, CancellationToken? cancellationToken = null)
+        public static async Task<string> GenerateScriptAsync(this LLM llm, List<ChatMessage> messages, bool interactiveGeneration = false, LLMGenerationOptions? generationOptions = null, CancellationToken? cancellationToken = null)
         {
             if (generationOptions == null)
                 generationOptions = llm.DefaultGenerationOptions;
@@ -83,7 +83,7 @@ namespace Comgenie.AI
 
                 ChatResponse? chat;
                 var scriptToExecute = "";
-                
+
                 while (true)
                 {
                     if (cancellationToken.HasValue)
@@ -94,7 +94,10 @@ namespace Comgenie.AI
                     if (chat == null || chat.choices == null || chat.choices.Count == 0)
                         throw new Exception("No response from AI");
 
-                    if (interactiveGeneration && chat.choices[0].finish_reason == "stop") // stop because of text sequence
+                    if (!interactiveGeneration)
+                        break;
+
+                    if (chat.choices[0].finish_reason == "stop") // stop because of text sequence
                     {
                         if (messages.Last() is ChatAssistantMessage assistantMessage)
                         {
@@ -117,7 +120,7 @@ namespace Comgenie.AI
                             if (!string.IsNullOrEmpty(lastLineScript) && lastLineMessage == lastLineScript)
                             {
                                 // Currently generating a script, execute the last line and return output if applicable
-                                Console.WriteLine("Script line: " +  lastLineScript);
+                                Console.WriteLine("Script line: " + lastLineScript);
                                 scriptToExecute += lastLineScript + "\r\n";
 
                                 if (cancellationToken.HasValue)
@@ -137,9 +140,9 @@ namespace Comgenie.AI
                                 {
                                     Console.WriteLine("Executing: " + scriptToExecute);
                                     console.Output = "";
-                                    
+
                                     var value = engine.Evaluate(scriptToExecute);
-                                    
+
                                     scriptToExecute = "";
 
                                     if (!string.IsNullOrEmpty(console.Output))
@@ -199,7 +202,7 @@ namespace Comgenie.AI
         /// <param name="llm">LLM instance with (optionally) added tool calls</param>
         /// <param name="script">Script excluding any formatting tags</param>
         /// <returns>Output of the last statement within the script.</returns>
-        public static async Task<object?> ExecuteScriptAsync(this LLM llm, string script, CancellationToken? cancellationToken = null)
+        public static async Task<ScriptResult> ExecuteScriptAsync(this LLM llm, string script, CancellationToken? cancellationToken = null)
         {
             var console = new ConsoleMethods();
             var engine = new Jint.Engine().SetValue("console", console);
@@ -214,8 +217,18 @@ namespace Comgenie.AI
 
             if (!string.IsNullOrEmpty(console.Output))
                 Debug.WriteLine(console.Output);
-            
-            return result.ToObject();
+
+            return new ScriptResult
+            {
+                LastStatementValue = result.ToObject(),
+                ConsoleOutput = console.Output
+            };
+        }
+
+        public class ScriptResult
+        {
+            public object? LastStatementValue { get; set; }
+            public string? ConsoleOutput { get; set; }
         }
 
         /// <summary>
@@ -355,6 +368,6 @@ namespace Comgenie.AI
             }
         }
 
-        
+
     }
 }
