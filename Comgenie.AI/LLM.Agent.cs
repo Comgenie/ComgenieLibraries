@@ -38,9 +38,21 @@ namespace Comgenie.AI
                     textContent.text = $"<UserInstruction>\r\n{textContent.text}\r\n</UserInstruction>\r\n\r\nYou are in agent mode now. Above is the original user prompt. Please make a full plan for each step to do the requested action or answer the given question. Return this plan in the following JSON structure:\r\n{jsonExample}";
             }
 
-            // TODO: Magic!
+            var plan = await GenerateStructuredResponseAsync<AgentExecutionPlan>(messages, false, generationOptions, cancellationToken);
 
-            return null; 
+            if (plan?.Steps == null)
+                return null;
+
+            var flow = BuildFlow();
+            foreach (var step in plan.Steps)
+            {
+                // TODO: Based on this instruction, find out if this is a 'repeatable' step or not
+                // TODO: Add 'evaluation' moments where the plan can be expanded or finished
+
+                flow.AddStep(step.Instruction, a => a.Proceed());
+            }
+
+            return flow; 
 
         }
         /// <summary>
@@ -48,7 +60,7 @@ namespace Comgenie.AI
         /// </summary>
         /// <param name="messages">List of messages, requiring at least 1 user message</param>
         /// <returns>The last assistant response from the LLM</returns>
-        public async Task<ChatResponse?> GenerateSolutionAsync(List<ChatMessage> messages, LLMGenerationOptions? generationOptions = null, CancellationToken? cancellationToken = null)
+        public async Task<InstructionFlowContext?> GenerateSolutionAsync(List<ChatMessage> messages, LLMGenerationOptions? generationOptions = null, CancellationToken? cancellationToken = null)
         {
             if (generationOptions == null)
                 generationOptions = DefaultGenerationOptions;
@@ -62,7 +74,7 @@ namespace Comgenie.AI
 
             var response = await flow.GenerateAsync();
 
-            return null; // TODO
+            return response;
         }
 
         private class AgentExecutionPlan
@@ -73,8 +85,7 @@ namespace Comgenie.AI
         private class AgentExecutionPlanStep
         {
             [Instruction("A well written concise instruction for this step")]
-            public string StepInstruction { get; set; }
+            public string Instruction { get; set; }
         }
-
     }
 }

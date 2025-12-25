@@ -1,8 +1,6 @@
 ﻿using Comgenie.AI;
 using Comgenie.AI.Entities;
-using System.Reflection;
 using System.Text.Json;
-using static System.Net.Mime.MediaTypeNames;
 
 namespace AIExample
 {
@@ -30,7 +28,7 @@ namespace AIExample
 
             ToolCallExamples.ToolCallExample(model).Wait();
 
-            //ScriptExamples.ScriptExample(model).Wait();
+            ScriptExamples.ScriptExample(model).Wait();
 
             FlowExamples.FlowExample(model).Wait();
             FlowExamples.RepeatableFlowExample(model).Wait();

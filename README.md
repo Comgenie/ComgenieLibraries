@@ -47,7 +47,7 @@ Available as [nuget package](https://www.nuget.org/packages/Comgenie.Util/) .
 - QueryTranslator turns a linq-expression into a simple parsable text filter
 
 ## Comgenie.AI
-A library with helpers for communicating with AI services like llama.cpp, OpenAI (Native and Azure).
+A library with helpers for communicating with AI services like llama.cpp, OpenAI (Native and Azure using Completions endpoint).
 
 - Cost tracking
 - Request caching

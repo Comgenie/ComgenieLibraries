@@ -35,14 +35,16 @@ namespace Comgenie.AI
         {
             ActiveModel = model;
 
-            if (automaticModelInformationRetrieval)
-                SetActiveModel(model).Wait(); // Sadly, it's not possible to have async constructors atm
+            SetActiveModel(model, automaticModelInformationRetrieval).Wait(); // Sadly, it's not possible to have async constructors atm
         }
-        public async Task SetActiveModel(ModelInfo model)
+        public async Task SetActiveModel(ModelInfo model, bool automaticModelInformationRetrieval = true)
         {
             ActiveModel = model;
-
-            if (model.ServerType == ModelInfo.ModelServerType.LlamaCpp)
+            if (model.MaxContextLength.HasValue && model.MaxContextLength.Value > 0)
+            {
+                MaxContentLength = model.MaxContextLength;
+            }
+            else if (model.ServerType == ModelInfo.ModelServerType.LlamaCpp && automaticModelInformationRetrieval)
             {
                 var url = new Uri(model.ApiUrlCompletions);
                 var httpClient = GetHttpClient();
@@ -60,6 +62,15 @@ namespace Comgenie.AI
                 {
                     Debug.WriteLine("Could not retrieve context length from /props endpoint. " + ex.Message);
                 }
+            }
+
+
+            if (!MaxContentLength.HasValue)
+            {
+                // Set a useful default
+                // - Recent models of OpenAI/Azure AI have 128k+ context length
+                // - Llama.cpp models are often run locally with very limited context lengths
+                MaxContentLength = model.ServerType == ModelInfo.ModelServerType.LlamaCpp ? 8_000 : 128_000;  
             }
             
         }

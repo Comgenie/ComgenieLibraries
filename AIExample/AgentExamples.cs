@@ -26,7 +26,7 @@ namespace AIExample
                 }
             });
 
-            Console.WriteLine(response?.LastAsString());
+            Console.WriteLine(response?.LastChatResponse?.LastAsString());
         }
     }
 }
