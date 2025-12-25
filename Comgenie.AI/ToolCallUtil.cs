@@ -185,6 +185,17 @@ namespace Comgenie.AI
                 return arrObj;
             }
 
+            // Check if type is DateTime
+            if (type == typeof(DateTime))
+            {
+                return new ToolCallStringFieldParameterInfo
+                {
+                    type = "string", // No 'datetime' type available
+                    Description = attr?.Description ?? "Date and time in ISO string format"
+                };
+            }
+
+
             // Complex types (classes/structs)
             if (type.IsClass || (type.IsValueType && !type.IsPrimitive))
             {
