@@ -140,7 +140,7 @@ namespace Comgenie.AI
             {
                 Execute = async (llm, context) =>
                 {
-                    var prompt = "<UserInstruction>" + instruction + "</UserInstruction>\r\n\r\nAbove is the original user instruction to repeat an action one or more times. Please first generate the list we will enumerate through to execute the requested users action.";
+                    var prompt = "<UserInstruction>" + instruction + "</UserInstruction>\r\n\r\nAbove is the original user instruction to repeat an action one or more times. Please first generate the list we will enumerate through to execute the requested users action. For example if the user asks to 'do something on each file', add each file with the file specific instruction to the list.";
                     context.Messages.Add(new ChatUserMessage(prompt));
                     var listResponse = await llm.GenerateStructuredResponseAsync<RepeatableStepResponse>(context.Messages, true, context.GenerationOptions, context.CancellationToken);
                     if (listResponse != null && listResponse.List != null && listResponse.List.Count > 0)

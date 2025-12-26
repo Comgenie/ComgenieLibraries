@@ -43,13 +43,37 @@ namespace Comgenie.AI
             if (plan?.Steps == null)
                 return null;
 
-            var flow = BuildFlow();
-            foreach (var step in plan.Steps)
-            {
-                // TODO: Based on this instruction, find out if this is a 'repeatable' step or not
-                // TODO: Add 'evaluation' moments where the plan can be expanded or finished
+            var refinePlanMessages = new List<ChatMessage>();
+            refinePlanMessages.Add(new ChatSystemMessage(
+                "You are an assistant refining a previously generated plan. " +
+                "Without any previous context you'll look at a given plan and add any missing information with properties present in the result JSON.\r\n" +
+                "For the step Type property the Type should be set to Collection if any of this is true given the step Instruction:\r\n" +
+                "- An instruction is doing something on 'each' element in a list.\r\n" +
+                "- Generally if 'each', 'for every', 'iterate over' or 'for all' is mentioned within the instruction.\r\n"));
+            refinePlanMessages.Add(new ChatUserMessage($"You are refining the following plan:\r\n{JsonSerializer.Serialize(plan)}"));
 
-                flow.AddStep(step.Instruction, a => a.Proceed());
+            var refinedPlan = await GenerateStructuredResponseAsync<RefinedAgentExecutionPlan>(refinePlanMessages, true, generationOptions, cancellationToken);
+
+            var flow = BuildFlow();
+
+            foreach (var step in refinedPlan.Steps)
+            {
+                if (step.Type != null && step.Type.Contains("collection", StringComparison.OrdinalIgnoreCase))
+                {
+                    flow.AddRepeatableStep(step.Instruction, a =>
+                    {
+                        // TODO: Ask if the execution plan should be modified
+                        a.Proceed();
+                    });
+                }
+                else
+                {
+                    flow.AddStep(step.Instruction, a =>
+                    {
+                        // TODO: Ask if the execution plan should be modified
+                        a.Proceed();
+                    });
+                }
             }
 
             return flow; 
@@ -86,6 +110,20 @@ namespace Comgenie.AI
         {
             [Instruction("A well written concise instruction for this step")]
             public string Instruction { get; set; }
+        }
+
+        private class RefinedAgentExecutionPlan
+        {
+            [Instruction("A full list of steps within this execution plan")]
+            public List<RefinedAgentExecutionPlanStep> Steps { get; set; }
+        }
+        private class RefinedAgentExecutionPlanStep
+        {
+            [Instruction("A well written concise instruction for this step")]
+            public string Instruction { get; set; }
+
+            [Instruction("The type 'Operation' for regular steps exeuting a simple operation. The type 'Collection' for any instructions with any type of iterating (for each .. etc).")]
+            public string Type { get; set; }
         }
     }
 }
