@@ -9,44 +9,8 @@ namespace HttpServerExample
 {
     internal partial class Program
     {
-        static void RewindBufferTest()
-        {
-            var ms = new MemoryStream();
-            for (var i=0; i < 10000000; i++)
-            {
-                ms.WriteByte((byte)('0' + (i % 10)));
-            }
-            ms.Position = 0;
-
-            var rewindBuffer = new RewindableStream(ms, 555, 155);
-            byte[] tmp = new byte[100];
-
-            rewindBuffer.Read(tmp);
-            var str = Encoding.ASCII.GetString(tmp);
-            Console.WriteLine("RewindableStream: " + str);
-            for (var i = 0; i < 100000; i++)
-            {
-                
-                var len = rewindBuffer.Read(tmp);
-                if (len < 100)
-                {
-                    Console.WriteLine(len);
-                }
-                rewindBuffer.Rewind(30);
-                var str2 = Encoding.ASCII.GetString(tmp, 0, len);
-                if (str != str2)
-                {
-                    Console.WriteLine("RewindableStream: " + i + " - " + str + " != " + str2);
-                    break;
-                }
-               
-            }
-
-        }
         static void Main(string[] args)
         {
-            //RewindBufferTest();
-            //return;
             var domain = "yourdomain.here";
             using (var server = new Server())
             {
@@ -57,7 +21,7 @@ namespace HttpServerExample
                 var http = new HttpHandler();
 
                 // Simple static content route
-                //http.AddContentRoute(domain, "/", ASCIIEncoding.ASCII.GetBytes("<html><body>Hi there! <script src=\"/js/script.js\"></script></body></html>"), "text/html");
+                http.AddContentRoute(domain, "/", ASCIIEncoding.ASCII.GetBytes("<html><body>Hi there! <script src=\"/js/script.js\"></script></body></html>"), "text/html");
 
                 // File or folder route
                 http.AddFileRoute(domain, "/js/*", "./js", null);
