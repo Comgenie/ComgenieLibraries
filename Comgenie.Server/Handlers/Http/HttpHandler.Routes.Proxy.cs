@@ -33,92 +33,108 @@ namespace Comgenie.Server.Handlers.Http
                 {
                     if (data.Request == null)
                         return null;
+
                     // Just connect to http endpoint and stream all content
-                    try
+                    // We'll do 2 attempts as the sharedtcpclient might break in some non-complaint http servers
+                    for (var attempt = 1; attempt <= 2; attempt++)
                     {
-                        // Build request
-                        StringBuilder request = new StringBuilder();
-                        var requestRaw = data.RequestRaw ?? "";
-                        if (!requestRaw.StartsWith("/"))
-                            requestRaw = "/" + requestRaw;
-
-                        // route: /* ,  path: / , result: /
-                        // route: /test/*,  path: /test/ ,   result: /
-                        // route: /test.html, path: /test.html, result: /
-                        // route: /test/*, path: /test/blah, result: /blah
-
-                        requestRaw = "/" + requestRaw.Substring(pathWithoutWildcard.Length);
-
-                        request.AppendLine(data.Method + " " + requestRaw + " HTTP/1.1"); // TODO: Remove any folder in our routing path
-                        request.AppendLine("Host: " + new Uri(targetUrl).Host);
-                        if (shouldSendForwardHeaders)
+                        try
                         {
-                            if (data.Headers.ContainsKey("host"))
-                                request.AppendLine("X-Forwarded-Host: " + data.Headers["host"]);
-                            request.AppendLine("X-Forwarded-Proto: " + (data.Client.StreamIsEncrypted ? "https" : "http"));
-                            request.AppendLine("X-Forwarded-For: " + data.Client.RemoteAddress);
+                            // Build request
+                            StringBuilder request = new StringBuilder();
+                            var requestRaw = data.RequestRaw ?? "";
+                            if (!requestRaw.StartsWith("/"))
+                                requestRaw = "/" + requestRaw;
+
+                            // route: /* ,  path: / , result: /
+                            // route: /test/*,  path: /test/ ,   result: /
+                            // route: /test.html, path: /test.html, result: /
+                            // route: /test/*, path: /test/blah, result: /blah
+
+                            requestRaw = "/" + requestRaw.Substring(pathWithoutWildcard.Length);
+
+                            request.AppendLine(data.Method + " " + requestRaw + " HTTP/1.1"); // TODO: Remove any folder in our routing path
+                            request.AppendLine("Host: " + new Uri(targetUrl).Host);
+                            if (shouldSendForwardHeaders)
+                            {
+                                if (data.Headers.ContainsKey("host"))
+                                    request.AppendLine("X-Forwarded-Host: " + data.Headers["host"]);
+                                request.AppendLine("X-Forwarded-Proto: " + (data.Client.StreamIsEncrypted ? "https" : "http"));
+                                request.AppendLine("X-Forwarded-For: " + data.Client.RemoteAddress);
+                            }
+
+                            foreach (var requestHeader in data.FullRawHeaders.ToList())
+                            {
+                                if (requestHeader.Key == "Host")
+                                    continue;
+                                if (interceptHandler != null && shouldInterceptHandler != null && requestHeader.Key == "Accept-Encoding")
+                                    continue;
+                                request.AppendLine(requestHeader.Key + ": " + requestHeader.Value);
+                            }
+                            request.AppendLine();
+
+
+                            using (var responseStream = await SharedTcpClient.ExecuteHttpRequest(targetUrl, request.ToString(), data.DataStream))
+                            {
+                                var intercept = shouldInterceptHandler != null && interceptHandler != null && shouldInterceptHandler((data.Request, responseStream.ResponseHeaders));
+                                if (intercept)
+                                {
+                                    var content = new StreamReader(responseStream, Encoding.UTF8).ReadToEnd();
+                                    var newContent = interceptHandler!((data.Request, responseStream.ResponseHeaders, content));
+                                    var newResponseHeaders = string.Join("\r\n", responseStream.ResponseHeaders
+                                        .Split(new string[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries)
+                                        .Where(a => !a.StartsWith("Content-Length:") && !a.StartsWith("Transfer-Encoding:")));
+
+                                    await client.SendString(newResponseHeaders + "\r\nContent-Length: " + newContent.Length + "\r\n\r\n");
+                                    await client.SendString(newContent, Encoding.UTF8);
+                                }
+                                else
+                                {
+                                    responseStream.IncludeChunkedHeadersInResponse = true;
+                                    await client.SendString(responseStream.ResponseHeaders);
+                                    await client.SendStream(responseStream, 0, -1);
+                                }
+
+                                // TODO: For logging purposes also fill in some of the remaining HttpResponse fields based on the responseStream.ResponseHeaders
+                                var space = responseStream.ResponseHeaders.IndexOf(' ');
+                                var responseCode = 0;
+                                if (space > 0)
+                                {
+                                    var secondSpace = responseStream.ResponseHeaders.IndexOf(' ', space + 1);
+                                    if (secondSpace > 0)
+                                        int.TryParse(responseStream.ResponseHeaders.Substring(space + 1, secondSpace - (space + 1)), out responseCode);
+                                }
+
+                                return new HttpResponse()
+                                {
+                                    StatusCode = responseCode,
+                                    ResponseFinished = true,
+                                };
+                            }
+
                         }
-
-                        foreach (var requestHeader in data.FullRawHeaders.ToList())
+                        catch (Exception e)
                         {
-                            if (requestHeader.Key == "Host")
+                            Console.WriteLine(e.Message + "\r\n" + e.StackTrace);
+
+                            if (attempt < 2)
                                 continue;
-                            if (interceptHandler != null && shouldInterceptHandler != null && requestHeader.Key == "Accept-Encoding")
-                                continue;
-                            request.AppendLine(requestHeader.Key + ": " + requestHeader.Value);
-                        }
-                        request.AppendLine();
-
-                        
-                        using (var responseStream = await SharedTcpClient.ExecuteHttpRequest(targetUrl, request.ToString(), data.DataStream))
-                        {
-                            var intercept = shouldInterceptHandler != null && interceptHandler != null && shouldInterceptHandler((data.Request, responseStream.ResponseHeaders));
-                            if (intercept)
-                            {
-                                var content = new StreamReader(responseStream, Encoding.UTF8).ReadToEnd();
-                                var newContent = interceptHandler!((data.Request, responseStream.ResponseHeaders, content));
-                                var newResponseHeaders = string.Join("\r\n", responseStream.ResponseHeaders
-                                    .Split(new string[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries)
-                                    .Where(a => !a.StartsWith("Content-Length:") && !a.StartsWith("Transfer-Encoding:")));
-
-                                await client.SendString(newResponseHeaders + "\r\nContent-Length: " + newContent.Length + "\r\n\r\n");
-                                await client.SendString(newContent, Encoding.UTF8);
-                            }
-                            else
-                            {
-                                responseStream.IncludeChunkedHeadersInResponse = true;
-                                await client.SendString(responseStream.ResponseHeaders);
-                                await client.SendStream(responseStream, 0, -1);
-                            }
-
-                            // TODO: For logging purposes also fill in some of the remaining HttpResponse fields based on the responseStream.ResponseHeaders
-                            var space = responseStream.ResponseHeaders.IndexOf(' ');
-                            var responseCode = 0;
-                            if (space > 0)
-                            {
-                                var secondSpace = responseStream.ResponseHeaders.IndexOf(' ', space + 1);
-                                if (secondSpace > 0)
-                                    int.TryParse(responseStream.ResponseHeaders.Substring(space + 1, secondSpace - (space + 1)), out responseCode);
-                            }
 
                             return new HttpResponse()
                             {
-                                StatusCode = responseCode,
-                                ResponseFinished = true,
+                                StatusCode = 500,
+                                ContentType = "text/plain",
+                                Data = Encoding.UTF8.GetBytes("Proxy error: " + e.Message + "\r\n" + e.StackTrace)
                             };
                         }
-                        
                     }
-                    catch (Exception e)
+
+                    return new HttpResponse()
                     {
-                        Console.WriteLine(e.Message + "\r\n" + e.StackTrace);
-                        return new HttpResponse()
-                        {
-                            StatusCode = 500,
-                            ContentType = "text/plain",
-                            Data = Encoding.UTF8.GetBytes("Proxy error: " + e.Message + "\r\n" + e.StackTrace)
-                        };
-                    }
+                        StatusCode = 500,
+                        ContentType = "text/plain",
+                        Data = Encoding.UTF8.GetBytes("No response")
+                    };
                 }
             });
         }
