@@ -153,10 +153,10 @@ namespace Comgenie.Server.Handlers.Remote
 
                                     // Build http header request
                                     StringBuilder request = new StringBuilder();
-                                    request.AppendLine(httpClientData.Method + " " + httpClientData.RequestRaw + " HTTP/1.1");
+                                    request.Append($"{httpClientData.Method} {httpClientData.RequestRaw} HTTP/1.1\r\n");
                                     foreach (var requestHeader in httpClientData.Headers)
-                                        request.AppendLine(requestHeader.Key + ": " + requestHeader.Value);
-                                    request.AppendLine();
+                                        request.Append($"{requestHeader.Key}: {requestHeader.Value}\r\n");
+                                    request.Append("\r\n");
                                     var headerData = Encoding.ASCII.GetBytes(request.ToString());
                                     if (headerData.Length > RemoteUtil.MaxPacketSize)
                                         throw new Exception("HTTP header too large");

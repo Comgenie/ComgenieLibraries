@@ -463,15 +463,15 @@ namespace Comgenie.Server.Handlers.Http
             var codeText = ((HttpStatusCode)response.StatusCode).ToString();
 
             StringBuilder sb = new StringBuilder();
-            sb.AppendLine("HTTP/1.1 " + response.StatusCode + " " + codeText);
+            sb.Append($"HTTP/1.1 {response.StatusCode} {codeText}\r\n");
             if (response.ContentType != "")
-                sb.AppendLine("Content-Type: " + (response.ContentType ?? "text/html"));
+                sb.Append($"Content-Type: {(response.ContentType ?? "text/html")}\r\n");
 
 
             // Check if we can actually return the response with gzip compression
             if (response.GZipResponse && data.Headers.ContainsKey("accept-encoding") && data.Headers["accept-encoding"].Contains("gzip") && response.Data == null && response.Stream != null)
             {
-                sb.AppendLine("Content-Encoding: gzip");
+                sb.Append("Content-Encoding: gzip\r\n");
                 response.ChunkedResponse = true; // required as we don't know the final transfer content length yet
             }
             else
@@ -481,23 +481,23 @@ namespace Comgenie.Server.Handlers.Http
 
             if ((response.ChunkedResponse || response.ContentLengthStream < 0) && response.Data == null && response.Stream != null)
             {
-                sb.AppendLine("Transfer-Encoding: chunked");
+                sb.Append("Transfer-Encoding: chunked\r\n");
                 response.Stream = new ChunkedStream(response.Stream, response.GZipResponse);
                 response.ContentLengthStream = -1;
             }
             else
             {
                 if (response.ContentType != "")
-                    sb.AppendLine("Content-Length: " + (response.Data != null ? response.Data.Length : response.Stream != null ? response.ContentLengthStream : 0));
+                    sb.Append($"Content-Length: {(response.Data != null ? response.Data.Length : response.Stream != null ? response.ContentLengthStream : 0)}\r\n");
             }
 
             if (response.Headers != null)
             {
                 foreach (var header in response.Headers)
-                    sb.AppendLine(header.Key + ": " + header.Value);
+                    sb.Append($"{header.Key}: {header.Value}\r\n");
             }
 
-            sb.AppendLine();
+            sb.Append("\r\n");
 
             var tmpResponseHeader = Encoding.ASCII.GetBytes(sb.ToString());
 

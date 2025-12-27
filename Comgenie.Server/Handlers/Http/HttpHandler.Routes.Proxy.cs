@@ -53,14 +53,14 @@ namespace Comgenie.Server.Handlers.Http
 
                             requestRaw = "/" + requestRaw.Substring(pathWithoutWildcard.Length);
 
-                            request.AppendLine(data.Method + " " + requestRaw + " HTTP/1.1"); // TODO: Remove any folder in our routing path
-                            request.AppendLine("Host: " + new Uri(targetUrl).Host);
+                            request.Append($"{data.Method} {requestRaw} HTTP/1.1\r\n"); // TODO: Remove any folder in our routing path
+                            request.Append($"Host: {new Uri(targetUrl).Host}\r\n");
                             if (shouldSendForwardHeaders)
                             {
                                 if (data.Headers.ContainsKey("host"))
-                                    request.AppendLine("X-Forwarded-Host: " + data.Headers["host"]);
-                                request.AppendLine("X-Forwarded-Proto: " + (data.Client.StreamIsEncrypted ? "https" : "http"));
-                                request.AppendLine("X-Forwarded-For: " + data.Client.RemoteAddress);
+                                    request.Append($"X-Forwarded-Host: {data.Headers["host"]}\r\n");
+                                request.Append($"X-Forwarded-Proto: {(data.Client.StreamIsEncrypted ? "https" : "http")}\r\n");
+                                request.Append($"X-Forwarded-For: {data.Client.RemoteAddress}\r\n");
                             }
 
                             foreach (var requestHeader in data.FullRawHeaders.ToList())
@@ -69,10 +69,9 @@ namespace Comgenie.Server.Handlers.Http
                                     continue;
                                 if (interceptHandler != null && shouldInterceptHandler != null && requestHeader.Key == "Accept-Encoding")
                                     continue;
-                                request.AppendLine(requestHeader.Key + ": " + requestHeader.Value);
+                                request.Append($"{requestHeader.Key}: {requestHeader.Value}\r\n");
                             }
-                            request.AppendLine();
-
+                            request.Append("\r\n");
 
                             using (var responseStream = await SharedTcpClient.ExecuteHttpRequest(targetUrl, request.ToString(), data.DataStream))
                             {
