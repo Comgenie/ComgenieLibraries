@@ -57,6 +57,10 @@ namespace Comgenie.AI
         public int DocumentReferencingExpandBeforeCharacterCount { get; set; } = 50;
         public int DocumentReferencingExpandAfterCharacterCount { get; set; } = 50;
         public int DocumentReferencingMaxSize { get; set; } = 1024;
+        public string DocumentReferencingXMLDocumentsTagName { get; set; } = "documents";
+        public string DocumentReferencingXMLDocumentTagName { get; set; } = "document";
+        public string DocumentReferencingAddedInstruction { get; set; } = "Here are the related passages in the attached documents based on the user's last message";
+        public double DocumentReferencingRelevanceThreshold { get; set; } = 0.75;
 
         /// <summary>
         /// Create a copy of this options instance so that all settings can be changed safely.

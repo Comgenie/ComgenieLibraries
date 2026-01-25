@@ -173,7 +173,8 @@ namespace Comgenie.AI
                     else
                     {
                         var summary = await GenerateRelatedDocumentsSummaryAsync(textContent.text, generationOptions, cancellationToken);
-                        textContent.text = "Here are the related passages in the attached documents based on the user's last message:\r\n" + summary + "\r\n\r\n" + textContent.text;
+                        if (!string.IsNullOrEmpty(summary))
+                            textContent.text = $"{generationOptions.DocumentReferencingAddedInstruction}:\r\n" + summary + "\r\n\r\n" + textContent.text;
                     }
                 }
             } 

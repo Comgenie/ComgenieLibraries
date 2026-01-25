@@ -299,7 +299,7 @@ namespace Comgenie.AI
                         document.Value.Text.Substring(i) :
                         document.Value.Text.Substring(i, chunkSize);
 
-                    var prompt = GetRelatedDocumentSnippit(1, i, chunk.Length, chunk, document.Value.SourceName, document.Value.Text, generationOptions.DocumentReferencingMode) + "\r\n\r\n" +
+                    var prompt = GetRelatedDocumentSnippit(1, i, chunk.Length, chunk, document.Value.SourceName, document.Value.Text, generationOptions) + "\r\n\r\n" +
                         $"<UserInstruction>{CleanXmlValue(text)}</UserInstruction>\r\n\r\n" + PromptDeepDive;
 
                     var chunkResponse = await GenerateResponseAsync(prompt, generationOptions, cancellationToken);
@@ -372,7 +372,7 @@ namespace Comgenie.AI
             var sb = new StringBuilder();
             if (generationOptions.DocumentReferencingMode == DocumentReferencingMode.XML)
             {
-                sb.AppendLine("<documents>");
+                sb.AppendLine($"<{generationOptions.DocumentReferencingXMLDocumentsTagName}>");
             }
             else if (generationOptions.DocumentReferencingMode == DocumentReferencingMode.Json)
             {
@@ -389,7 +389,7 @@ namespace Comgenie.AI
                 var length = result.Item.Length;
 
                 index++;
-                var textToAddShort = GetRelatedDocumentSnippit(index, start, length, relatedText.ToString(), result.Item.Source.SourceName, result.Item.Source.Text, generationOptions.DocumentReferencingMode);
+                var textToAddShort = GetRelatedDocumentSnippit(index, start, length, relatedText.ToString(), result.Item.Source.SourceName, result.Item.Source.Text, generationOptions);
 
                 if (generationOptions.DocumentReferencingExpandBeforeCharacterCount > 0 || generationOptions.DocumentReferencingExpandAfterCharacterCount > 0)
                 {
@@ -402,11 +402,11 @@ namespace Comgenie.AI
                     relatedText = result.Item.Source.Text.AsMemory(start, length);
                 }
 
-                var textToAdd = GetRelatedDocumentSnippit(index, start, length, relatedText.ToString(), result.Item.Source.SourceName, result.Item.Source.Text, generationOptions.DocumentReferencingMode);
+                var textToAdd = GetRelatedDocumentSnippit(index, start, length, relatedText.ToString(), result.Item.Source.SourceName, result.Item.Source.Text, generationOptions);
 
-                if (sb.Length + textToAdd.Length + 21 > generationOptions.DocumentReferencingMaxSize) // Exceeding max size with the long text, try adding the short version
+                if (sb.Length + textToAdd.Length + generationOptions.DocumentReferencingXMLDocumentsTagName.Length + 5 > generationOptions.DocumentReferencingMaxSize) // Exceeding max size with the long text, try adding the short version
                 {
-                    if (sb.Length + textToAddShort.Length + 21 <= generationOptions.DocumentReferencingMaxSize) // Fits with the short version
+                    if (sb.Length + textToAddShort.Length + generationOptions.DocumentReferencingXMLDocumentsTagName.Length + 5 <= generationOptions.DocumentReferencingMaxSize) // Fits with the short version
                     {
                         if (generationOptions.DocumentReferencingMode == DocumentReferencingMode.Json && index > 1)
                             sb.Append(",");
@@ -424,7 +424,7 @@ namespace Comgenie.AI
 
             if (generationOptions.DocumentReferencingMode == DocumentReferencingMode.XML)
             {
-                sb.AppendLine("</documents>");
+                sb.AppendLine($"</{generationOptions.DocumentReferencingXMLDocumentsTagName}>");
             }
             else if (generationOptions.DocumentReferencingMode == DocumentReferencingMode.Json)
             {
@@ -434,7 +434,7 @@ namespace Comgenie.AI
 
             return sb.ToString();
         }
-        private static string GetRelatedDocumentSnippit(int index, long offset, long length, string relatedText, string sourceName, string sourceText, DocumentReferencingMode format)
+        private string GetRelatedDocumentSnippit(int index, long offset, long length, string relatedText, string sourceName, string sourceText, LLMGenerationOptions? generationOptions = null)
         {
             if (offset > 0)
                 relatedText = "[...] " + relatedText;
@@ -442,13 +442,17 @@ namespace Comgenie.AI
             if (offset + length < sourceText.Length)
                 relatedText += " [...]";
 
+            var format = generationOptions?.DocumentReferencingMode ?? DefaultGenerationOptions.DocumentReferencingMode;
+
             if (format == DocumentReferencingMode.XML)
             {
-                return $"  <document index=\"{index}\">\r\n" +
+                return $"  <{generationOptions?.DocumentReferencingXMLDocumentTagName ?? "document"} index=\"{index}\">\r\n" +
                     $"    <source>{CleanXmlValue(sourceName)}</source>\r\n" +
                     $"    <offset>{offset}</offset>\r\n" +
-                    $"    <document_content>" + CleanXmlValue(relatedText.ToString()) + "</document_content>" +
-                    "  </document>";
+                    $"    <{generationOptions?.DocumentReferencingXMLDocumentTagName ?? "document"}_content>" +
+                    CleanXmlValue(relatedText.ToString()) +
+                    $"</{generationOptions?.DocumentReferencingXMLDocumentTagName ?? "document"}_content>\r\n" +
+                    $"  </{generationOptions?.DocumentReferencingXMLDocumentTagName ?? "document"}>";
             }
             else if (format == DocumentReferencingMode.Markdown)
             {
@@ -569,7 +573,7 @@ namespace Comgenie.AI
                         Score = result.relevance_score
                     });
                 }
-                return results.OrderByDescending(a => a.Score).ToList();
+                return results.Where(a=> a.Score >= (generationOptions?.DocumentReferencingRelevanceThreshold ?? 0.75)).OrderByDescending(a => a.Score).ToList();
             }, generationOptions.FailedRequestRetryCount, cancellationToken);
             
             return results;
