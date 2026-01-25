@@ -4,7 +4,6 @@
     {
         public ChatToolMessage()
         {
-            role = "tool";
         }
 
         public string? tool_call_id { get; set; }

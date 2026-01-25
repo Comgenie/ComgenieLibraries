@@ -15,7 +15,6 @@ namespace Comgenie.AI.Entities
     [JsonDerivedType(typeof(ChatAssistantMessage), typeDiscriminator: "assistant")]
     public abstract class ChatMessage
     {
-        public string role { get; set; } = "user"; // default
     }
 
 

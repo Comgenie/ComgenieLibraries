@@ -4,7 +4,6 @@
     {
         public ChatAssistantMessage()
         {
-            role = "assistant";
         }
         public string content { get; set; } = "";
         public List<ChatAssistantMessageToolCall>? tool_calls { get; set; }

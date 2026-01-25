@@ -7,11 +7,9 @@ namespace Comgenie.AI.Entities
     {
         public ChatUserMessage()
         {
-            role = "user";
         }
         public ChatUserMessage(string message)
         {
-            this.role = "user";
             this.content.Add(new ChatMessageTextContent(message));
         }
         public List<ChatMessageContent> content { get; set; } = new();
@@ -23,18 +21,15 @@ namespace Comgenie.AI.Entities
     [JsonDerivedType(typeof(ChatMessageImageContent), typeDiscriminator: "image_url")]
     public abstract class ChatMessageContent
     {
-        public string type { get; set; } = "text";
     }
     public class ChatMessageTextContent : ChatMessageContent
     {
         public ChatMessageTextContent()
         {
-            type = "text";
         }
         [SetsRequiredMembers]
         public ChatMessageTextContent(string text)
         {
-            type = "text";
             this.text = text;
         }
         public required string text { get; set; } = "";
@@ -44,12 +39,10 @@ namespace Comgenie.AI.Entities
     {
         public ChatMessageImageContent()
         {
-            type = "image_url";
         }
         [SetsRequiredMembers]
         public ChatMessageImageContent(string localImagePath)
         {
-            type = "image_url";
             // Retrieve local image and base64 encode it
             if (!File.Exists(localImagePath))
                 throw new FileNotFoundException("Image file not found", localImagePath);
