@@ -432,7 +432,7 @@ namespace Comgenie.Server.Utils
 
                         await sslStream.AuthenticateAsClientAsync(mxServer[0]);
 
-                        writer = new StreamWriter(sslStream, ASCIIEncoding.ASCII) { AutoFlush = true }; // , NewLine = "\r\n"
+                        writer = new StreamWriter(sslStream, ASCIIEncoding.ASCII) { AutoFlush = true, NewLine = "\r\n" };
                         reader = new StreamReader(sslStream, ASCIIEncoding.ASCII);
 
                         // Say ehlo again after TLS
