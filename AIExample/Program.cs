@@ -22,11 +22,11 @@ namespace AIExample
 
             BasicExamples.NormalResponseExample(model).Wait();
             BasicExamples.StructuredResponseExample(model).Wait();
-
+            
             DocumentSearchExamples.DocumentExample(model).Wait(); // Requires Embedding and Ranking url to be set
             DocumentSearchExamples.EmbeddingsExample(model).Wait(); // Requires Embedding and Ranking url to be set
 
-            ToolCallExamples.ToolCallExample(model).Wait();
+            ToolCallExamples.ToolCallExample(model).Wait(); // Requires a model with VL (for this example) and toolcall understanding
 
             ScriptExamples.ScriptExample(model).Wait();
 

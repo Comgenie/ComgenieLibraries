@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 
@@ -15,6 +16,12 @@ namespace Comgenie.AI.Entities
     [JsonDerivedType(typeof(ChatAssistantMessage), typeDiscriminator: "assistant")]
     public abstract class ChatMessage
     {
+        public ChatMessage Clone()
+        {
+            // Use serialization to create a deep copy of the object
+            var json = JsonSerializer.Serialize(this);
+            return (ChatMessage)JsonSerializer.Deserialize(json, this.GetType())!;
+        }
     }
 
 

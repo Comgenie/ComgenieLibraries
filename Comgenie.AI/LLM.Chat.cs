@@ -180,7 +180,7 @@ namespace Comgenie.AI
             } 
 
             if (MaxContentLength.HasValue)
-                TrimOldMessages(messages, MaxContentLength.Value - 1000); // Space for response
+                TrimOldMessages(messages, MaxContentLength.Value - 1000, generationOptions); // Space for response
 
             var completionRequest = new
             {
@@ -299,10 +299,48 @@ namespace Comgenie.AI
         /// <param name="messages">List of messages, note that this list will be modified, but at least 2 messages will be kept in there. System messages will not be removed.</param>
         /// <param name="maxContextLength">Max context length to try to fit to</param>
         /// <returns>Number of messages removed</returns>
-        private int TrimOldMessages(List<ChatMessage> messages, long maxContextLength)
+        private int TrimOldMessages(List<ChatMessage> messages, long maxContextLength, LLMGenerationOptions generationOptions)
         {
             var removedMessageCount = 0;
-            
+            List<(ChatMessage, long)?> messageToToken = EstimateTokenCount(messages);
+
+            var currentContextLength = messageToToken.Sum(a => a.Value.Item2);
+
+            bool dontUseCustomTrimHandler = false;
+            while (messageToToken.Count > 2 && currentContextLength > maxContextLength)
+            {
+                // Attempt to shrink the used context length using any custom provided handler
+                if (generationOptions.OnTrimMessages != null && !dontUseCustomTrimHandler)
+                {
+                    generationOptions.OnTrimMessages(messages, maxContextLength);
+                    var newMessageToToken = EstimateTokenCount(messages); // Call it again in case the custom trim handler modifies content
+                    var newContextSize = newMessageToToken.Sum(a => a.Value.Item2);
+                    if (newContextSize >= currentContextLength)
+                    {
+                        // Custom method didn't reduce the size so fall back to the default algorithm
+                        dontUseCustomTrimHandler = true;
+                    }
+                    currentContextLength = newContextSize;
+                    messageToToken = newMessageToToken;
+                    continue;
+                }
+
+                // Remove the first non-system message
+                var messageToRemove = messageToToken.FirstOrDefault(a => a.Value.Item1 is not ChatSystemMessage);
+                if (messageToRemove == null)
+                    break; // Nothing to remove anymore
+                removedMessageCount++;
+                messageToToken.Remove(messageToRemove);
+                if (!messages.Remove(messageToRemove.Value.Item1))
+                    break;
+
+                currentContextLength = messageToToken.Sum(a => a.Value.Item2);
+            }
+
+            return removedMessageCount;
+        }
+        private List<(ChatMessage, long)?> EstimateTokenCount(List<ChatMessage> messages)
+        {
             List<(ChatMessage, long)?> messageToToken = new();
             for (var i = 0; i < messages.Count; i++)
             {
@@ -334,20 +372,7 @@ namespace Comgenie.AI
                 }
                 messageToToken.Add((messages[i], estimatedTokenUsage));
             }
-
-            while (messageToToken.Count > 2 && messageToToken.Sum(a => a.Value.Item2) > maxContextLength)
-            {
-                // Remove the first non-system message
-                var messageToRemove = messageToToken.FirstOrDefault(a => a.Value.Item1 is not ChatSystemMessage);
-                if (messageToRemove == null)
-                    break; // Nothing to remove anymore
-                removedMessageCount++;
-                messageToToken.Remove(messageToRemove);
-                if (!messages.Remove(messageToRemove.Value.Item1))
-                    break;
-            }
-
-            return removedMessageCount;
+            return messageToToken;
         }
     }
 }

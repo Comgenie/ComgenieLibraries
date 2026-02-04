@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Comgenie.AI.Entities;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -50,6 +51,9 @@ namespace Comgenie.AI
         /// </summary>
         public int FailedRequestRetryCount { get; set; } = 3;
 
+        /// <summary>
+        /// If the cache is configured and this property is set to true, then the cache will first be checked to see if there is already a response available.
+        /// </summary>
         public bool UseCacheIfAvailable { get; set; } = true;
 
         public DocumentReferencingMode DocumentReferencingMode { get; set; } = DocumentReferencingMode.FunctionCallDocuments;
@@ -61,6 +65,21 @@ namespace Comgenie.AI
         public string DocumentReferencingXMLDocumentTagName { get; set; } = "document";
         public string DocumentReferencingAddedInstruction { get; set; } = "Here are the related passages in the attached documents based on the user's last message";
         public double DocumentReferencingRelevanceThreshold { get; set; } = 0.75;
+
+        /// <summary>
+        /// When set, any text used to find related documents will be passed through this function and it's return value will be used instead.
+        /// Use this to strip out any injected tags or text to improve finding related documents.
+        /// If returning a null or empty string, the related documents finder will stop early and return 0 results.
+        /// </summary>
+        public Func<string, string>? OnDocumentRelatedText { get; set; }
+
+        /// <summary>
+        /// When set, this action will be used as first attempt to trim chat messages to make it fit into the model's context size.
+        /// This will only be called when the messages are exceeding the context size.
+        /// The default method (delete old user/assistant messages) will be used when this method is null or doesn't reduce the size at all.
+        /// </summary>
+        public Action<List<ChatMessage>, long>? OnTrimMessages { get; set; } = null;
+
 
         /// <summary>
         /// Create a copy of this options instance so that all settings can be changed safely.
@@ -75,7 +94,21 @@ namespace Comgenie.AI
                 StopEarlyTextSequences = StopEarlyTextSequences,
                 IncludeAvailableTools = IncludeAvailableTools,
                 ExecuteToolCalls = ExecuteToolCalls,
-                ContinueAfterToolCalls = ContinueAfterToolCalls
+                ContinueAfterToolCalls = ContinueAfterToolCalls,
+                FailedRequestRetryCount = FailedRequestRetryCount,
+                UseCacheIfAvailable = UseCacheIfAvailable,
+                DocumentReferencingMode = DocumentReferencingMode,
+                DocumentReferencingAddedInstruction = DocumentReferencingAddedInstruction,
+                DocumentReferencingMaxSize = DocumentReferencingMaxSize,
+                DocumentReferencingCombineCloseCharacterCount = DocumentReferencingCombineCloseCharacterCount,
+                DocumentReferencingExpandAfterCharacterCount = DocumentReferencingExpandAfterCharacterCount,
+                DocumentReferencingXMLDocumentsTagName = DocumentReferencingXMLDocumentsTagName,
+                DocumentReferencingExpandBeforeCharacterCount = DocumentReferencingExpandBeforeCharacterCount,
+                DocumentReferencingRelevanceThreshold = DocumentReferencingRelevanceThreshold,
+                DocumentReferencingXMLDocumentTagName = DocumentReferencingXMLDocumentTagName,
+                OnDocumentRelatedText = OnDocumentRelatedText,
+                OnTrimMessages = OnTrimMessages
+
             };
         }
     }

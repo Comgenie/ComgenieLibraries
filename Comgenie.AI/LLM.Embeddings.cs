@@ -104,6 +104,14 @@ namespace Comgenie.AI
             DocumentVectorDB.DeleteDocumentSource(documentName);
         }
 
+        /// <summary>
+        /// Check if a document is already added to the document vector db (with at least 1 textual reference)
+        /// </summary>
+        /// <param name="documentName">Name used to add the document</param>
+        /// <returns>True if the document is found and has at least one reference</returns>
+        public bool HasDocument(string documentName)
+            => DocumentVectorDB?.Documents?.ContainsKey(documentName) == true && DocumentVectorDB.Documents[documentName].References.Count > 0;
+        
         
         /// <summary>
         /// Completely unload the vector db and all documents within.
@@ -341,7 +349,10 @@ namespace Comgenie.AI
             if (generationOptions == null)
                 generationOptions = DefaultGenerationOptions;
 
-            if (DocumentVectorDB == null)
+            if (generationOptions.OnDocumentRelatedText != null)
+                text = generationOptions.OnDocumentRelatedText(text);
+
+            if (DocumentVectorDB == null || string.IsNullOrWhiteSpace(text))
                 return ""; // No document added means no summary
 
             // TODO: If we found our given text exactly within one of the documents, we want to prefer that
@@ -597,7 +608,11 @@ namespace Comgenie.AI
             generationOptions.DocumentReferencingMode = DocumentReferencingMode.Json;
 
             var json = await GenerateRelatedDocumentsSummaryAsync(query, generationOptions);
+            if (string.IsNullOrEmpty(json))
+                return new RetrieveDocumentsResult();
             var items = JsonSerializer.Deserialize<List<RelatedDocumentItem>>(json);
+
+
             return new RetrieveDocumentsResult()
             {
                 results = items ?? new()
@@ -609,20 +624,9 @@ namespace Comgenie.AI
         private async Task<RetrieveDocumentsResult> retrieve_code([ToolCall("A piece of code like a method declaration found within the code", Required = true)] string query)
         {
             // TODO: Code specific syntax tricks to more easily return just a single method body etc.
-
-            Console.WriteLine("Retrieve code files called with text: " + query);
-            if (DocumentVectorDB == null)
-                return new RetrieveDocumentsResult();
-
-            var json = await GenerateRelatedDocumentsSummaryAsync(query, DefaultGenerationOptions);
-            var items = JsonSerializer.Deserialize<List<RelatedDocumentItem>>(json);
-
-            return new RetrieveDocumentsResult()
-            {
-                results = items ?? new()
-            };
+            return await retrieve_documents(query);
         }
-        private class RetrieveDocumentsResult
+        public class RetrieveDocumentsResult
         {
             public List<RelatedDocumentItem> results { get; set; } = new();
         }

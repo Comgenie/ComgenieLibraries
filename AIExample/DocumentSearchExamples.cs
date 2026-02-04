@@ -86,6 +86,11 @@ namespace AIExample
             // Now order the 3 found facts using the reranking endpoint to find the one most relevant to the question (context relevance)
             var ranked = await llm.GenerateRankingsAsync(question, search.Select(s => s.Item.ToString()).ToList());
 
+            if (ranked.Count == 0)
+            {
+                Console.WriteLine("Could not find any relatext text to " + question);
+                return;
+            }
             Console.WriteLine("Most relevant fact: \"" + ranked[0].Item + "\" with score " + ranked[0].Score);
         }
 

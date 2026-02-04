@@ -26,6 +26,11 @@ namespace Comgenie.AI
             if (generationOptions == null)
                 generationOptions = DefaultGenerationOptions;
 
+            // TODO: Support different 'agent modes':
+            // - Fixed predetermined plan (Current)
+            // - Plan with possibility to adapt during execution
+            // - Only decide next step, Perceive (Prompt/Last step result), Reason, Decide, Act cycle)
+
             if (!messages.Any(a=>a is ChatUserMessage))
                 return null;
 

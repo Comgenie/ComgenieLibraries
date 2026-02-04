@@ -62,12 +62,13 @@
             // Combine overlapping and close (within margin) items. Keep the highest similarity score.
             foreach (var item in items.OrderBy(i => i.Item.Offset))
             {
-                if (list.Count == 0)
+                var sameDocumentItems = list.Where(a => a.Item.Source == item.Item.Source).ToList();
+                if (sameDocumentItems.Count == 0)
                 {
                     list.Add(item);
                     continue;
                 }
-                var last = list.Last();
+                var last = sameDocumentItems.Last();
                 if (item.Item.Offset <= last.Item.Offset + last.Item.Length + margin)
                 {
                     // Overlapping or close, combine

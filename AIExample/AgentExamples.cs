@@ -14,6 +14,7 @@ namespace AIExample
         public static async Task AgentExample(ModelInfo model)
         {
             var llm = new LLM(model);
+
             var response = await llm.GenerateSolutionAsync(new List<ChatMessage>()
             {
                 new ChatSystemMessage("You are a helpful assistant."),
