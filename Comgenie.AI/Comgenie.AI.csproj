@@ -1,13 +1,34 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-  </PropertyGroup>
+	<PropertyGroup>
+		<TargetFramework>net9.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
+		<Title>Comgenie AI</Title>
+		<Authors>Comgenie</Authors>
+		<Company>Comgenie</Company>
+		<Description>This library gives the ability to communicate with LLM backends (llama.cpp, OpenAI, Azure) using c# including tool calling and document referencing</Description>
+		<Version>2026.02.04.1</Version>
+		<RepositoryUrl>https://github.com/Comgenie/ComgenieLibraries.git</RepositoryUrl>
+		<PackageProjectUrl>https://github.com/Comgenie/ComgenieLibraries</PackageProjectUrl>
+		<PackageIcon>icon.png</PackageIcon>
+		<RepositoryType>git</RepositoryType>
+		<PackageTags>ai library;tool calling;document referencing;cross platform</PackageTags>
+		<GenerateDocumentationFile>True</GenerateDocumentationFile>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
+	</PropertyGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="..\Comgenie.Util\Comgenie.Util.csproj" />
-  </ItemGroup>
+	<ItemGroup>
+		<None Include="..\icon.png" Link="icon.png">
+			<PackagePath>\</PackagePath>
+			<Pack>True</Pack>
+		</None>
+		<None Include="README.md" Pack="true" PackagePath="\" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\Comgenie.Util\Comgenie.Util.csproj" />
+	</ItemGroup>
 
 </Project>

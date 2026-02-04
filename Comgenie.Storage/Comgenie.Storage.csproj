@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
     <Title>Comgenie Storage</Title>
-    <Version>2025.10.02.1</Version>
+    <Version>2026.02.04.1</Version>
     <Authors>Comgenie</Authors>
     <Company>Comgenie</Company>
     <PackageProjectUrl>https://github.com/Comgenie/ComgenieLibraries</PackageProjectUrl>
@@ -24,7 +24,7 @@
       <Pack>True</Pack>
       <PackagePath>\</PackagePath>
     </None>
-	<None Include="README.md" Pack="true" PackagePath="\"/>
+	<None Include="README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
   <ItemGroup>

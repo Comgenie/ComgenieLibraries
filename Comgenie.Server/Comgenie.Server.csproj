@@ -7,7 +7,7 @@
     <Authors>Comgenie</Authors>
     <Company>Comgenie</Company>
     <Description>This library gives the ability to run http and smtp servers from your own code</Description>
-    <Version>2025.10.02.1</Version>
+    <Version>2026.02.04.1</Version>
     <RepositoryUrl>https://github.com/Comgenie/ComgenieLibraries.git</RepositoryUrl>
     <PackageProjectUrl>https://github.com/Comgenie/ComgenieLibraries</PackageProjectUrl>
     <PackageIcon>icon.png</PackageIcon>
