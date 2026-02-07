@@ -15,7 +15,7 @@ namespace Comgenie.Server.Handlers.Http
         {
             AddRoute(domain, path, new Route()
             {
-                HandleExecuteRequest = (client, data) =>
+                HandleExecuteRequestAsync = async (client, data, cancellationToken) =>
                 {
                     // Websocket route, see if the request is actually meant for a websocket 
                     if (data.Headers.ContainsKey("sec-websocket-key"))
@@ -35,7 +35,7 @@ namespace Comgenie.Server.Handlers.Http
                             CallbackResponseSent = connectHandler
                         };
                         data.DisconnectedHandlerAsync = disconnectHandler;
-                        data.OverrideHandleClientDataAsync = async (client) =>
+                        data.OverrideHandleClientDataAsync = async (client, httpClient) =>
                         {
                             if (data.IncomingBufferLength <= 2)
                                 return false;
@@ -95,9 +95,10 @@ namespace Comgenie.Server.Handlers.Http
                             else
                             {
                                 // Got all data in offset, with msglen
+                                client.ResetTimeout();
                                 if (opcode == 0x09) // ping
                                 {
-                                    await data.SendWebsocketMessage(0x0A, data.IncomingBuffer, offset, msglen);
+                                    await data.SendWebsocketMessage(0x0A, data.IncomingBuffer, offset, msglen, cancellationToken);
                                 }
                                 else if (opcode == 0x01 || opcode == 0x02) // 0x01 text or 0x02 binary
                                 {
@@ -107,7 +108,7 @@ namespace Comgenie.Server.Handlers.Http
                                 {
                                     // TODO, body contents is reason of closing
                                     // Just echo for now
-                                    await data.SendWebsocketMessage(0x08, data.IncomingBuffer, offset, msglen);
+                                    await data.SendWebsocketMessage(0x08, data.IncomingBuffer, offset, msglen, cancellationToken);
                                 }
                                 else
                                 {

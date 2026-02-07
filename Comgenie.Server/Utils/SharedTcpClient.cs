@@ -22,11 +22,11 @@ namespace Comgenie.Server.Utils
         private static List<OpenConnection> ExistingConnections = new List<OpenConnection>();
         private static object ExistingConnectionsLockObj = new object();
 
-        public OpenConnection Connection;
+        private OpenConnection? Connection;
         private static int InstanceCount = 0;
-        public int CurrentInstanceNumber = 0;
+        private int CurrentInstanceNumber = 0;
 
-        public SharedTcpClient(string host, int port, bool ssl, int closeAfterSeconds = 60)
+        public async void ConnectAsync(string host, int port, bool ssl, int closeAfterSeconds = 60, CancellationToken cancellationToken = default)
         {
             CurrentInstanceNumber = ++InstanceCount;
             // Check if there is any open connection to reuse            
@@ -91,10 +91,10 @@ namespace Comgenie.Server.Utils
                         host : // Path was provided
                         Path.Combine(Path.GetTempPath(), host); // Default to temp path
 
-                    socket.Connect(new UnixDomainSocketEndPoint(socketPath));
+                    await socket.ConnectAsync(new UnixDomainSocketEndPoint(socketPath), cancellationToken);
                 }
                 else
-                    socket.Connect(host, port);
+                    await socket.ConnectAsync(host, port, cancellationToken);
                 
                 Log.Debug(nameof(SharedTcpClient), CurrentInstanceNumber + " After connect");
                 Stream stream = new NetworkStream(socket, true);
@@ -102,7 +102,7 @@ namespace Comgenie.Server.Utils
                 {
                     Log.Debug(nameof(SharedTcpClient), CurrentInstanceNumber + " Before ssl stream auth");
                     stream = new SslStream(stream, false);
-                    ((SslStream)stream).AuthenticateAsClient(host);
+                    await ((SslStream)stream).AuthenticateAsClientAsync(new SslClientAuthenticationOptions() { TargetHost = host }, cancellationToken);
                     Log.Debug(nameof(SharedTcpClient), CurrentInstanceNumber + " After ssl stream auth");
                 }
 
@@ -164,7 +164,7 @@ namespace Comgenie.Server.Utils
             }
         }
 
-        public class OpenConnection
+        private class OpenConnection
         {
             public required string Host { get; set; }
             public required int Port { get; set; }
@@ -181,7 +181,7 @@ namespace Comgenie.Server.Utils
         /// Helper methods
 
         // Execute http request and returns a stream with the full response
-        public static async Task<SingleHttpResponseStream> ExecuteHttpRequest(string url, string requestHeaders, Stream? requestContent)
+        public static async Task<SingleHttpResponseStream> ExecuteHttpRequest(string url, string requestHeaders, Stream? requestContent, CancellationToken cancellationToken = default)
         {
             
             var uri = new Uri(url);
@@ -192,23 +192,26 @@ namespace Comgenie.Server.Utils
                 string socketPath = System.Net.WebUtility.UrlDecode(uri.Host); // "/tmp/my.sock"
 
                 Log.Debug(nameof(SharedTcpClient), "Connecting to unix domain socket path: " + socketPath);
-                client = new SharedTcpClient(socketPath, 0, false);
+                client = new SharedTcpClient();
+                client.ConnectAsync(socketPath, 0, false, cancellationToken: cancellationToken);
             }
             else
             {
-                client = new SharedTcpClient(uri.Host, uri.Port, uri.Port == 443);
+                client = new SharedTcpClient();
+                client.ConnectAsync(uri.Host, uri.Port, uri.Port == 443, cancellationToken: cancellationToken);
             }
-            
             
             client.Connection.CanReuse = false;
             Log.Debug(nameof(SharedTcpClient), "Send headers");
-            await client.Connection.Stream.WriteAsync(Encoding.ASCII.GetBytes(requestHeaders));
+            await client.Connection.Stream.WriteAsync(Encoding.ASCII.GetBytes(requestHeaders), cancellationToken);
             if (requestContent != null)
-                await requestContent.CopyToAsync(client.Connection.Stream);
+                await requestContent.CopyToAsync(client.Connection.Stream, cancellationToken);
             Log.Debug(nameof(SharedTcpClient), "Before flush");
-            await client.Connection.Stream.FlushAsync();
+            await client.Connection.Stream.FlushAsync(cancellationToken);
             Log.Debug(nameof(SharedTcpClient), "After flush");
-            return new SingleHttpResponseStream(client);
+            var responseStream = new SingleHttpResponseStream(client);
+            await responseStream.ReadResponseHeadersAsync(cancellationToken);
+            return responseStream;
         }
 
         public class SingleHttpResponseStream : Stream, IDisposable
@@ -224,16 +227,18 @@ namespace Comgenie.Server.Utils
             public SingleHttpResponseStream(SharedTcpClient sharedTcpClient)
             {
                 Client = sharedTcpClient;
-
+            }
+            public async Task ReadResponseHeadersAsync(CancellationToken cancellationToken = default)
+            {
                 // Get response headers
                 Log.Debug(nameof(SingleHttpResponseStream), Client.CurrentInstanceNumber + " Start initial reading buffer");
 
                 byte[] buffer = new byte[1024 * 10];
-                var headerLength = sharedTcpClient.Connection.Stream.ReadTillBytes(buffer, new byte[] { (byte)'\r', (byte)'\n', (byte)'\r', (byte)'\n' });
+                var headerLength = await Client.Connection.Stream.ReadTillBytesAsync(buffer, new byte[] { (byte)'\r', (byte)'\n', (byte)'\r', (byte)'\n' }, cancellationToken: cancellationToken);
                 
                 if (headerLength <= 0)
                 {
-                    sharedTcpClient.Connection.Socket.Close();
+                    Client.Connection.Socket.Close();
                     throw new Exception("Invalid response in proxy request or connection prematurely closed");
                 }
 
@@ -262,7 +267,7 @@ namespace Comgenie.Server.Utils
                 if (endPos < 0)
                 {
                     // Invalid Content-Length header
-                    sharedTcpClient.Connection.Socket.Close();
+                    Client.Connection.Socket.Close();
                     throw new Exception("Invalid Content-Length header in proxy response");
                 }
                 contentLengthStr = contentLengthStr.Substring(0, endPos).Trim();
@@ -270,7 +275,7 @@ namespace Comgenie.Server.Utils
                 long contentLengthValue;
                 if (!long.TryParse(contentLengthStr, out contentLengthValue))
                 {
-                    sharedTcpClient.Connection.Socket.Close();
+                    Client.Connection.Socket.Close();
                     throw new Exception("Invalid Content-Length number in proxy response");
                 }
 
@@ -288,7 +293,12 @@ namespace Comgenie.Server.Utils
 
             public override long Position { get; set; }
             private bool CurrentContentEnded { get; set; } = false;
+
             public override int Read(byte[] buffer, int offset, int count)
+            {
+                return ReadAsync(buffer, offset, count).GetAwaiter().GetResult();
+            }
+            public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
             {
                 Log.Debug(nameof(SingleHttpResponseStream), Client.CurrentInstanceNumber + " Start reading (Content length " + CurrentContentLength + ")");
 
@@ -302,7 +312,7 @@ namespace Comgenie.Server.Utils
                 {
                     byte[] contentLengthBuffer = new byte[100];
 
-                    var length = Client.Connection.Stream.ReadTillBytes(contentLengthBuffer, new byte[] { (byte)'\r', (byte)'\n' }, startingPos: 1);
+                    var length = await Client.Connection.Stream.ReadTillBytesAsync(contentLengthBuffer, new byte[] { (byte)'\r', (byte)'\n' }, startingPos: 1, cancellationToken: cancellationToken);
                     if (length == 0)
                     {
                         Log.Warning(nameof(SingleHttpResponseStream), "Invalid content length line (1)");
@@ -361,7 +371,7 @@ namespace Comgenie.Server.Utils
                     count = (int)CurrentContentLength - (int)CurrentDataPos;
 
                 Log.Debug(nameof(SingleHttpResponseStream), Client.CurrentInstanceNumber + " Just before actual read");
-                var len = Client.Connection.Stream.Read(buffer, offset, count);
+                var len = await Client.Connection.Stream.ReadAsync(buffer, offset, count, cancellationToken);
 
                 Log.Debug(nameof(SingleHttpResponseStream), Client.CurrentInstanceNumber + " Just after actual read");
 

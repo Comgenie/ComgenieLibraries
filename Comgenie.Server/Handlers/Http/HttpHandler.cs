@@ -28,7 +28,7 @@ namespace Comgenie.Server.Handlers.Http
         // Enable GZip compression for static text files 
         public string[] EnableGZipCompressionContentTypes = new string[] { "text/plain", "application/json", "text/html", "image/svg+xml", "application/xml", "text/css", "text/javascript" };
 
-        public Task ClientConnect(Client client)
+        public Task ClientConnectAsync(Client client, CancellationToken cancellationToken)
         {
             client.Data = new HttpClientData()
             {
@@ -38,7 +38,7 @@ namespace Comgenie.Server.Handlers.Http
             return Task.CompletedTask;
         }
 
-        public async Task ClientDisconnect(Client client)
+        public async Task ClientDisconnectAsync(Client client, CancellationToken cancellationToken)
         {
             if (client.Data == null)
                 return;
@@ -63,7 +63,7 @@ namespace Comgenie.Server.Handlers.Http
                 DomainAliases[aliasDomain] = mainDomain;
         }
 
-        public async Task ClientReceiveData(Client client, byte[] buffer, int len)
+        public async Task ClientReceiveDataAsync(Client client, byte[] buffer, int len, CancellationToken cancellationToken)
         {
             var data = (HttpClientData?)client.Data;
 
@@ -77,7 +77,7 @@ namespace Comgenie.Server.Handlers.Http
             {
                 if (data.OverrideHandleClientDataAsync != null)
                 {
-                    if (!await data.OverrideHandleClientDataAsync(data))
+                    if (!await data.OverrideHandleClientDataAsync(client, data))
                         break;
                     continue;
                 }
@@ -198,14 +198,14 @@ namespace Comgenie.Server.Handlers.Http
                         if (data.IncomingBufferLength >= dataExpecting)
                         {
                             // There is more than or exactly the data waiting that we are expecting
-                            await data.DataStream.WriteAsync(data.IncomingBuffer, 0, (int)dataExpecting);
+                            await data.DataStream.WriteAsync(data.IncomingBuffer, 0, (int)dataExpecting, cancellationToken);
                             data.IncomingBufferLength -= (int)dataExpecting;
                             data.DataLength = data.ContentLength;
                         }
                         else
                         {
                             // There is less data waiting
-                            await data.DataStream.WriteAsync(data.IncomingBuffer, 0, data.IncomingBufferLength);
+                            await data.DataStream.WriteAsync(data.IncomingBuffer, 0, data.IncomingBufferLength, cancellationToken);
                             data.DataLength += data.IncomingBufferLength;
                             data.IncomingBufferLength = 0;
                         }
@@ -246,7 +246,7 @@ namespace Comgenie.Server.Handlers.Http
 
                     try
                     {
-                        await ExecuteRequest(client, data);
+                        await ExecuteRequest(client, data, cancellationToken);
                     }
                     catch (Exception e)
                     {
@@ -261,7 +261,7 @@ namespace Comgenie.Server.Handlers.Http
                         var tmpResponse = Encoding.ASCII.GetBytes("HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\nContent-Length: " + content.Length + "\r\n\r\n" + content);
                         try
                         {
-                            await client.SendData(tmpResponse, 0, tmpResponse.Length);
+                            await client.SendDataAsync(tmpResponse, 0, tmpResponse.Length, cancellationToken: cancellationToken);
                         }
                         catch { }
                     }
@@ -295,7 +295,7 @@ namespace Comgenie.Server.Handlers.Http
             }
         }
 
-        private async Task ExecuteRequest(Client client, HttpClientData data)
+        private async Task ExecuteRequest(Client client, HttpClientData data, CancellationToken cancellationToken = default)
         {
             data.Request = System.Web.HttpUtility.UrlDecode(data.RequestRaw);
             Log.Debug(nameof(HttpHandler), "Got request from " + client.Socket?.RemoteEndPoint?.ToString() + " for " + data.Host + ": " + data.Request);
@@ -348,7 +348,7 @@ namespace Comgenie.Server.Handlers.Http
             {
                 if (route?.HandleExecuteRequestAsync != null)
                 {
-                    response = await route.HandleExecuteRequestAsync(client, data);
+                    response = await route.HandleExecuteRequestAsync(client, data, cancellationToken);
                 }
                 else if (route?.HandleExecuteRequest != null)
                 {
@@ -506,7 +506,7 @@ namespace Comgenie.Server.Handlers.Http
             if (data.Method == "HEAD")
             {
                 // Just return the headers
-                await client.SendData(tmpResponseHeader, 0, tmpResponseHeader.Length);
+                await client.SendDataAsync(tmpResponseHeader, 0, tmpResponseHeader.Length, cancellationToken: cancellationToken);
 
                 if (response.Stream != null)
                 {
@@ -525,16 +525,16 @@ namespace Comgenie.Server.Handlers.Http
                 var tmpResponse = new byte[tmpResponseHeader.Length + response.Data.Length];
                 Buffer.BlockCopy(tmpResponseHeader, 0, tmpResponse, 0, tmpResponseHeader.Length);
                 Buffer.BlockCopy(response.Data, 0, tmpResponse, tmpResponseHeader.Length, response.Data.Length);
-                await client.SendData(tmpResponse, 0, tmpResponse.Length);
+                await client.SendDataAsync(tmpResponse, 0, tmpResponse.Length, cancellationToken: cancellationToken);
             }
             else if (response.Stream != null)
             {
-                await client.SendData(tmpResponseHeader, 0, tmpResponseHeader.Length, false);
-                await client.SendStream(response.Stream, response.ContentOffsetStream, response.ContentLengthStream);
+                await client.SendDataAsync(tmpResponseHeader, 0, tmpResponseHeader.Length, false, cancellationToken: cancellationToken);
+                await client.SendStreamAsync(response.Stream, response.ContentOffsetStream, response.ContentLengthStream, cancellationToken: cancellationToken);
             }
             else
             {
-                await client.SendData(tmpResponseHeader, 0, tmpResponseHeader.Length); // Empty
+                await client.SendDataAsync(tmpResponseHeader, 0, tmpResponseHeader.Length, cancellationToken: cancellationToken); // Empty
             }
 
             if (response.CallbackResponseSent != null)
@@ -575,7 +575,7 @@ namespace Comgenie.Server.Handlers.Http
             }
         }
         
-        internal void AddCustomRoute(string domain, string path, Func<Client, HttpClientData, Task<HttpResponse?>> handleCallback)
+        internal void AddCustomRoute(string domain, string path, Func<Client, HttpClientData, CancellationToken, Task<HttpResponse?>> handleCallback)
         {
             AddRoute(domain, path, new Route()
             {
@@ -607,7 +607,7 @@ namespace Comgenie.Server.Handlers.Http
         internal class Route
         {
             public Func<Client, HttpClientData, HttpResponse?>? HandleExecuteRequest { get; set; }
-            public Func<Client, HttpClientData, Task<HttpResponse?>>? HandleExecuteRequestAsync { get; set; }
+            public Func<Client, HttpClientData, CancellationToken, Task<HttpResponse?>>? HandleExecuteRequestAsync { get; set; }
         }
     }
 }

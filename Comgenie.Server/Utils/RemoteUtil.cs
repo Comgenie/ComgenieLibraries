@@ -128,8 +128,10 @@ namespace Comgenie.Server.Utils
                                                 RemoteAddressPort = 0,
                                                 StreamIsReady = true,
                                                 ConnectMoment = DateTime.UtcNow,
-                                                Handler = handlerObj
+                                                Handler = handlerObj,
+                                                CancellationTokenSource = new CancellationTokenSource()
                                             };
+                                            newClient.ResetTimeout();
 
                                             newClient.Stream = new ForwardToCallBackStream((curBuffer, curOffset, curCount) =>
                                             {
@@ -152,7 +154,7 @@ namespace Comgenie.Server.Utils
 
                                             });
                                             Log.Debug(nameof(RemoteUtil), "call 'ClientConnect' on handler");
-                                            await newClient.Handler.ClientConnect(newClient);
+                                            await newClient.Handler.ClientConnectAsync(newClient, newClient.CancellationTokenSource.Token);
                                             IncomingClients.Add(clientId, newClient);
                                         }
                                     }
@@ -170,7 +172,7 @@ namespace Comgenie.Server.Utils
 
                                         Log.Debug(nameof(RemoteUtil), "call 'ClientReceiveData' with  " + actualData.Length + " data");
 
-                                        _ = client.AddIncomingBufferData(actualData, actualData.Length, () =>
+                                        _ = client.AddIncomingBufferDataAsync(actualData, actualData.Length, () =>
                                         {
                                             if (actualData.Length == 0) // The other side can send an empty data packet to mark the end of his data, that means by this point, we processed all data and we can send our 'end of the data'
                                             {
@@ -181,7 +183,7 @@ namespace Comgenie.Server.Utils
                                             
                                                 SendPacket(streamToMainInstance, 3, BitConverter.GetBytes((Int64)clientId)); // Just send the client id and no data
                                             }
-                                        });
+                                        }, client.CancellationTokenSource.Token);
                                     }
                                 }
                                 else if (command == 4) // Closing client connection ( Int64 Client id ), note that this can happen halfway during execution of a request
@@ -192,7 +194,7 @@ namespace Comgenie.Server.Utils
                                         Log.Debug(nameof(RemoteUtil), "Disconnecting client " + clientId);
                                         var client = IncomingClients[clientId];
                                         client.StreamIsReady = false;
-                                        await client.Handler.ClientDisconnect(client);
+                                        await client.Handler.ClientDisconnectAsync(client, CancellationToken.None);
                                         IncomingClients.Remove(clientId);
                                     }
                                 }

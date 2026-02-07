@@ -12,6 +12,7 @@ using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using static Comgenie.Server.Handlers.Http.HttpHandler;
 
@@ -19,8 +20,8 @@ namespace Comgenie.Server.Handlers.Remote
 {
     /// <summary>
     /// This allows another instance to connect to this instance and request and
-    //  - HTTP: Route requests to the remote instance
-    //  - SMTP: Route incoming email handling (TODO)
+    ///  - HTTP: Route requests to the remote instance
+    ///  - SMTP: Route incoming email handling (TODO)
     /// </summary>
     public class RemoteHandler : IConnectionHandler
     {
@@ -47,7 +48,7 @@ namespace Comgenie.Server.Handlers.Remote
         }
 
         // Remote client handling:
-        public Task ClientConnect(Client client)
+        public Task ClientConnectAsync(Client client, CancellationToken cancellationToken)
         {
             Log.Info(nameof(RemoteHandler), "Remote client connected");
 
@@ -58,7 +59,7 @@ namespace Comgenie.Server.Handlers.Remote
             return Task.CompletedTask;
         }
 
-        public Task ClientDisconnect(Client client)
+        public Task ClientDisconnectAsync(Client client, CancellationToken cancellationToken)
         {
             var data = (RemoteClientData?)client.Data;
 
@@ -82,7 +83,7 @@ namespace Comgenie.Server.Handlers.Remote
             return Task.CompletedTask;
         }
         public static Dictionary<long, BlockingCollection<byte[]>> DataQueues = new Dictionary<long, BlockingCollection<byte[]>>();
-        public async Task ClientReceiveData(Client client, byte[] buffer, int len) // Packet: Command byte, length uint32, data
+        public async Task ClientReceiveDataAsync(Client client, byte[] buffer, int len, CancellationToken cancellationToken) // Packet: Command byte, length uint32, data
         {
             var data = (RemoteClientData?)client.Data;
             if (data == null)
@@ -119,12 +120,13 @@ namespace Comgenie.Server.Handlers.Remote
                         Log.Info(nameof(RemoteHandler), "Authenticated remote instance");
                         data.Authenticated = true;
                         data.SpecificDomains = RemoteProxyKeys[key];
+                        client.ResetTimeout(new TimeSpan(1, 0, 0));
                     }
                     else
                     {
                         // Send error
                         Log.Warning(nameof(RemoteHandler), "Invalid key remote instance");
-                        await SendPacket(client, 255, Encoding.ASCII.GetBytes("Wrong remote instance key"));
+                        await SendPacket(client, 255, Encoding.ASCII.GetBytes("Wrong remote instance key"), cancellationToken: cancellationToken);
                     }
                 }
                 else if (data.Authenticated)
@@ -144,7 +146,7 @@ namespace Comgenie.Server.Handlers.Remote
                                     client.Server.AddDomain(domain);
                                 var path = routeKey.Substring(routeKey.IndexOf("/"));
                                 data.Routes.Add(new Tuple<string, string>(domain, path));
-                                _httpHandler.AddCustomRoute(domain, path, async (httpClient, httpClientData) =>
+                                _httpHandler.AddCustomRoute(domain, path, async (httpClient, httpClientData, routeCancellationToken) =>
                                 {
                                     Log.Debug(nameof(RemoteHandler), "Got request I need to reroute");
 
@@ -226,7 +228,7 @@ namespace Comgenie.Server.Handlers.Remote
                                                 break;
                                             }
 
-                                            await httpClient.SendData(response, 0, response.Length, flush: false);
+                                            await httpClient.SendDataAsync(response, 0, response.Length, flush: false);
                                         }
 
                                         if (httpClient.Stream != null)
@@ -263,6 +265,8 @@ namespace Comgenie.Server.Handlers.Remote
                     }
                     else if (command == 3 && expectedLength >= sizeof(long)) // Incoming data to proxy back to client   [ Int64 Client Id ] + [ Data ] ,  No data means end of response
                     {
+                        client.ResetTimeout(new TimeSpan(1, 0, 0));
+
                         var clientId = BitConverter.ToInt64(data.IncomingBuffer, 5);
                         Log.Debug(nameof(RemoteHandler), "Receiving data for " + clientId);
 
@@ -294,7 +298,7 @@ namespace Comgenie.Server.Handlers.Remote
             }
         }
 
-        private static async Task SendPacket(Client client, byte command, byte[] data, int dataOffset = -1, int dataCount = -1, long clientId = 0)
+        private static async Task SendPacket(Client client, byte command, byte[] data, int dataOffset = -1, int dataCount = -1, long clientId = 0, CancellationToken cancellationToken = default)
         {
             Log.Debug(nameof(RemoteHandler), "Sending command " + command);
 
@@ -310,7 +314,7 @@ namespace Comgenie.Server.Handlers.Remote
                 else
                     ms.Write(data);
                 ms.Position = 0;
-                await client.SendStream(ms, flush: false);
+                await client.SendStreamAsync(ms, flush: false, cancellationToken: cancellationToken);
             }
         }
 

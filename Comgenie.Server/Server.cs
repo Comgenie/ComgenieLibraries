@@ -24,6 +24,10 @@ using System.Threading.Tasks;
 
 namespace Comgenie.Server
 {
+    /// <summary>
+    /// Main Comgenie.Server instance. This is responsible for listening to a port, accepting connections and enabling the TLS connection 
+    /// before handing them off to the attached handler.
+    /// </summary>
     public class Server : IDisposable
     {
         internal const int MaxPacketSize = 1024 * 32;
@@ -213,7 +217,7 @@ namespace Comgenie.Server
                         var clientSocket = listenSocket.Accept();
                         if (clientSocket == null)
                             break;
-                        _ = InitConnection(listenSocket, clientSocket);
+                        _ = InitConnectionAsync(listenSocket, clientSocket);
                     }
                     catch (Exception ex)
                     {
@@ -224,7 +228,7 @@ namespace Comgenie.Server
             acceptThread.Start();
         }
 
-        private async Task InitConnection(Socket listenSocket, Socket clientSocket)
+        private async Task InitConnectionAsync(Socket listenSocket, Socket clientSocket)
         {
             string clientIp = "@"; // uds fallback
             int remotePort = 0;
@@ -265,22 +269,23 @@ namespace Comgenie.Server
                 LastDataReceivedMoment = DateTime.UtcNow,
                 LastDataSentMoment = DateTime.UtcNow,
                 RemoteAddress = clientIp,
-                RemoteAddressPort = remotePort
+                RemoteAddressPort = remotePort,
+                CancellationTokenSource = new CancellationTokenSource()
             };
+            client.ResetTimeout();
 
             client.NetworkStream = new NetworkStream(clientSocket);
 
             if (protocol.Ssl)
             {
-                EnableSSLOnClient(client);
+                EnableSSLOnClient(client, cancellationToken: client.CancellationTokenSource.Token);
             }
             else
             {
                 client.Stream = client.NetworkStream;
                 client.StreamIsReady = true; // No handshake required
-                await client.Handler.ClientConnect(client);
-                _ = client.Read();
-                //StartReadTask(client);
+                await client.Handler.ClientConnectAsync(client, client.CancellationTokenSource.Token);
+                _ = client.ReadAsync(client.CancellationTokenSource.Token);
             }
         }
 
@@ -292,7 +297,7 @@ namespace Comgenie.Server
         /// <param name="client">Connected client to start the handshake with</param>
         /// <param name="preferDomain">If the client sends a domain which we don't recognize, we will use this one instead (and the DefaultDomain one after that).</param>
         /// <param name="callBackStreamReadingStopped">After all waiting reading processes stopped, this can be used to send a message before the actual handshake starts.</param>
-        public void EnableSSLOnClient(Client client, string? preferDomain=null, Action? callBackStreamReadingStopped = null)
+        public void EnableSSLOnClient(Client client, string? preferDomain=null, Action? callBackStreamReadingStopped = null, CancellationToken cancellationToken = default)
         {
             var isUpgradedConnection = client.Stream != null;
 
@@ -337,7 +342,7 @@ namespace Comgenie.Server
                         EnabledSslProtocols = System.Security.Authentication.SslProtocols.Tls13 | System.Security.Authentication.SslProtocols.Tls12 /*| System.Security.Authentication.SslProtocols.Tls11*/,
                         //CipherSuitesPolicy = new CipherSuitesPolicy(allowedCipherSuite),
                         EncryptionPolicy = EncryptionPolicy.RequireEncryption
-                    });
+                    }, cancellationToken);
                 }
                 catch (Exception e)
                 {
@@ -348,7 +353,7 @@ namespace Comgenie.Server
                         // Disconnect client
                         if (isUpgradedConnection)
                         {
-                            await client.Disconnect();
+                            await client.DisconnectAsync();
                         }
                         else if (client.Socket != null)
                         {
@@ -366,9 +371,9 @@ namespace Comgenie.Server
 
                 if (!isUpgradedConnection)
                 {
-                    await client.Handler.ClientConnect(client);
+                    await client.Handler.ClientConnectAsync(client, cancellationToken);
                     // StartReadTask(client);
-                    _ = client.Read();
+                    _ = client.ReadAsync(cancellationToken);
                 }                
             });
         }
@@ -400,7 +405,7 @@ namespace Comgenie.Server
                 inactiveClients = Clients.Where(c => c.LastDataReceivedMoment < inactiveMoment && c.LastDataSentMoment < inactiveMoment).ToList();
 
             foreach (var client in inactiveClients)
-                client.Disconnect().Wait(); // This stops all read tasks
+                client.DisconnectAsync().Wait(); // This stops all read tasks
         }
 
         /// <summary>
@@ -415,10 +420,10 @@ namespace Comgenie.Server
             foreach (var listenSocket in Handlers)
                 listenSocket.Key.Close(); // Stop accepting new connections
             foreach (var client in Clients)
-                client.Disconnect().Wait(); // This stops all read tasks            
+                client.DisconnectAsync().Wait(); // This stops all read tasks            
         }
 
-        class ServerProtocol
+        private class ServerProtocol
         {
             public int Port { get; set; }
             public bool Ssl { get; set; }

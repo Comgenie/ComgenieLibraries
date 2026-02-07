@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using static Comgenie.Server.Handlers.Http.HttpHandler;
 
@@ -29,7 +30,7 @@ namespace Comgenie.Server.Handlers.Http
 
             AddRoute(domain, path, new Route()
             {
-                HandleExecuteRequestAsync = async (client, data) =>
+                HandleExecuteRequestAsync = async (client, data, cancellationToken) =>
                 {
                     if (data.Request == null)
                         return null;
@@ -73,25 +74,27 @@ namespace Comgenie.Server.Handlers.Http
                             }
                             request.Append("\r\n");
 
-                            using (var responseStream = await SharedTcpClient.ExecuteHttpRequest(targetUrl, request.ToString(), data.DataStream))
+                            
+                            using (var responseStream = await SharedTcpClient.ExecuteHttpRequest(targetUrl, request.ToString(), data.DataStream, cancellationToken))
                             {
                                 var intercept = shouldInterceptHandler != null && interceptHandler != null && shouldInterceptHandler((data.Request, responseStream.ResponseHeaders));
                                 if (intercept)
                                 {
-                                    var content = new StreamReader(responseStream, Encoding.UTF8).ReadToEnd();
+                                    var content = await new StreamReader(responseStream, Encoding.UTF8).ReadToEndAsync(cancellationToken);
                                     var newContent = interceptHandler!((data.Request, responseStream.ResponseHeaders, content));
                                     var newResponseHeaders = string.Join("\r\n", responseStream.ResponseHeaders
                                         .Split(new string[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries)
                                         .Where(a => !a.StartsWith("Content-Length:") && !a.StartsWith("Transfer-Encoding:")));
 
-                                    await client.SendString(newResponseHeaders + "\r\nContent-Length: " + newContent.Length + "\r\n\r\n");
-                                    await client.SendString(newContent, Encoding.UTF8);
+                                    await client.SendStringAsync(newResponseHeaders + "\r\nContent-Length: " + newContent.Length + "\r\n\r\n", cancellationToken: cancellationToken);
+                                    await client.SendStringAsync(newContent, Encoding.UTF8, cancellationToken: cancellationToken);
                                 }
                                 else
                                 {
+                                    
                                     responseStream.IncludeChunkedHeadersInResponse = true;
-                                    await client.SendString(responseStream.ResponseHeaders);
-                                    await client.SendStream(responseStream, 0, -1);
+                                    await client.SendStringAsync(responseStream.ResponseHeaders, cancellationToken: cancellationToken);
+                                    await client.SendStreamAsync(responseStream, 0, -1, cancellationToken: cancellationToken);
                                 }
 
                                 // TODO: For logging purposes also fill in some of the remaining HttpResponse fields based on the responseStream.ResponseHeaders

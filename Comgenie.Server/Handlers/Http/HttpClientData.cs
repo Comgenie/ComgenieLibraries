@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using static Comgenie.Server.Handlers.Http.HttpHandler;
 
@@ -82,7 +83,7 @@ namespace Comgenie.Server.Handlers.Http
         public string? ContentType { get; set; }
 
         /// <summary>
-        /// Small storage for posted data, this one is only used for request < 10 MB
+        /// Small storage for posted data, this one is only used for request smaller than 10 MB
         /// </summary>
         internal byte[]? Data { get; set; }
 
@@ -114,7 +115,7 @@ namespace Comgenie.Server.Handlers.Http
         /// <summary>
         /// Handler to take over the buffer processing. This is used in situations where the HTTP connection gets upgraded to a different type of protocol, like Websockets do.
         /// </summary>
-        public Func<HttpClientData, Task<bool>>? OverrideHandleClientDataAsync { get; set; }
+        public Func<Client, HttpClientData, Task<bool>>? OverrideHandleClientDataAsync { get; set; }
 
         /// <summary>
         /// Helper to directly get the value of a cookie with the provided cookie name. 
@@ -140,7 +141,7 @@ namespace Comgenie.Server.Handlers.Http
         }
 
 
-        public async Task SendWebsocketMessage(byte opcode, byte[] data, ulong offset, ulong len)
+        public async Task SendWebsocketMessage(byte opcode, byte[] data, ulong offset, ulong len, CancellationToken cancellationToken = default)
         {
             byte[] header;
             if (len < 126)
@@ -174,20 +175,20 @@ namespace Comgenie.Server.Handlers.Http
             header[0] = opcode;
             header[0] |= 0b10000000; // set fin flag
 
-            await Client.SendData(header, 0, header.Length, false);
-            await Client.SendData(data, (int)offset, (int)len, true);
+            await Client.SendDataAsync(header, 0, header.Length, false, cancellationToken);
+            await Client.SendDataAsync(data, (int)offset, (int)len, true, cancellationToken);
         }
-        public async Task SendWebsocketMessage(byte opcode, byte[] data)
+        public async Task SendWebsocketMessage(byte opcode, byte[] data, CancellationToken cancellationToken = default)
         {
-            await SendWebsocketMessage(opcode, data, 0, (ulong)data.Length);
+            await SendWebsocketMessage(opcode, data, 0, (ulong)data.Length, cancellationToken);
         }
-        public async Task SendWebsocketText(string text)
+        public async Task SendWebsocketText(string text, CancellationToken cancellationToken = default)
         {
-            await SendWebsocketMessage(0x01, Encoding.UTF8.GetBytes(text));
+            await SendWebsocketMessage(0x01, Encoding.UTF8.GetBytes(text), cancellationToken);
         }
-        public async Task SendWebsocketJsonObject(object obj)
+        public async Task SendWebsocketJsonObject(object obj, CancellationToken cancellationToken = default)
         {
-            await SendWebsocketMessage(0x01, Encoding.UTF8.GetBytes(JsonSerializer.Serialize(obj)));
+            await SendWebsocketMessage(0x01, Encoding.UTF8.GetBytes(JsonSerializer.Serialize(obj)), cancellationToken);
         }
     }
 }

@@ -116,6 +116,11 @@ namespace Comgenie.Server.Utils
 
         public override int Read(byte[] buffer, int offset, int count)
         {
+            return ReadAsync(buffer, offset, count).GetAwaiter().GetResult();
+        }
+        
+        public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
             ValidateBufferArgs(buffer, offset, count);
 
             if (count == 0)
@@ -166,7 +171,7 @@ namespace Comgenie.Server.Utils
                     if (StreamEnded || !firstRead)
                         break; // Inner stream has no more data
 
-                    int bytesReadFromInner = _innerStream.Read(ReadaheadTempBuffer, 0, _maxReadaheadBytes);
+                    int bytesReadFromInner =await _innerStream.ReadAsync(ReadaheadTempBuffer, 0, _maxReadaheadBytes, cancellationToken);
                     firstRead = false;
 
                     if (bytesReadFromInner == 0)
@@ -194,7 +199,30 @@ namespace Comgenie.Server.Utils
             return totalBytesCopiedToUser;
         }
 
+        /// <summary>
+        /// Read data from inner stream and stop early when bytesToFind is found.
+        /// Note: This will call the Async version, it is prefered to use the async method directly.
+        /// </summary>
+        /// <param name="buffer">Buffer to fill when reading data from the inner stream</param>
+        /// <param name="bytesToFind">Byte combination to find and stop reading (rewinds the stream till end of those characters)</param>
+        /// <param name="startingPos"></param>
+        /// <param name="rewindWhenNotFound">If the byte combination is not found, set to true to rewind as if no read action was done.</param>
+        /// <returns>Numberf of bytes read</returns>
         public int ReadTillBytes(byte[] buffer, byte[] bytesToFind, int startingPos = 0, bool rewindWhenNotFound = false)
+        {
+            return ReadTillBytesAsync(buffer, bytesToFind, startingPos, rewindWhenNotFound).GetAwaiter().GetResult();
+        }
+
+        /// <summary>
+        /// Read data from inner stream and stop early when bytesToFind is found.
+        /// </summary>
+        /// <param name="buffer">Buffer to fill when reading data from the inner stream</param>
+        /// <param name="bytesToFind">Byte combination to find and stop reading (rewinds the stream till end of those characters)</param>
+        /// <param name="startingPos"></param>
+        /// <param name="rewindWhenNotFound">If the byte combination is not found, set to true to rewind as if no read action was done.</param>
+        /// <param name="cancellationToken">Optional: Cancellation token to cancel this read action</param>
+        /// <returns>Numberf of bytes read</returns>
+        public async Task<int> ReadTillBytesAsync(byte[] buffer, byte[] bytesToFind, int startingPos = 0, bool rewindWhenNotFound = false, CancellationToken cancellationToken = default)
         {
             int bytesAvailableInHistoryAtCurrentPosition = 0;
             if (CurrentLogicalPosition < TotalBytesReadFromInnerStream) // Is the current read position within data already fetched?
@@ -211,11 +239,11 @@ namespace Comgenie.Server.Utils
                 {
                     // First we'll force to read the data from the history buffer
                     // This is needed because network streams will block if we try to read more than the available data, even if the thing we need is in the history buffer
-                    len = Read(buffer, bufferPos, bytesAvailableInHistoryAtCurrentPosition);
+                    len = await ReadAsync(buffer, bufferPos, bytesAvailableInHistoryAtCurrentPosition, cancellationToken);
                 }
                 else
                 {
-                    len = Read(buffer, bufferPos, buffer.Length - bufferPos);
+                    len = await ReadAsync(buffer, bufferPos, buffer.Length - bufferPos, cancellationToken);
                 }
 
                 if (len <= 0)
@@ -260,12 +288,20 @@ namespace Comgenie.Server.Utils
             return posCharactersEnd;
         }
 
-
+        /// <summary>
+        /// Flush the inner stream
+        /// </summary>
         public override void Flush()
         {
             _innerStream.Flush();
         }
 
+        /// <summary>
+        /// Seek the inner stream, this also clears the rewind buffer.
+        /// </summary>
+        /// <param name="offset">Offset from the origin to set the new position</param>
+        /// <param name="origin">Origin to set the new position</param>
+        /// <returns>The new position within the inner stream</returns>
         public override long Seek(long offset, SeekOrigin origin)
         {
             ResetBuffer();

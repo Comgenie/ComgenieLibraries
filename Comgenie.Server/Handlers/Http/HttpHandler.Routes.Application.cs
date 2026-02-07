@@ -9,6 +9,7 @@ using System.Net.Mime;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using static Comgenie.Server.Handlers.Http.HttpHandler;
 
@@ -32,7 +33,7 @@ namespace Comgenie.Server.Handlers.Http
                 var methodParameters = method.GetParameters();
                 var route = new Route()
                 {
-                    HandleExecuteRequestAsync = async (client, data) => {
+                    HandleExecuteRequestAsync = async (client, data, cancellationToken) => {
                         if (data.RequestRaw == null)
                             return null;
                         // Parse arguments
@@ -220,6 +221,8 @@ namespace Comgenie.Server.Handlers.Http
                         {
                             if (param.ParameterType == typeof(HttpClientData))
                                 paramValues.Add(data);
+                            else if (param.ParameterType == typeof(CancellationToken))
+                                paramValues.Add(cancellationToken);
                             else if (param.Name != null && rawParameters.ContainsKey(param.Name))
                             {
                                 if (param.ParameterType == typeof(string))

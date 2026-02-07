@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Comgenie.Server.Handlers.Dns
@@ -11,17 +12,17 @@ namespace Comgenie.Server.Handlers.Dns
     /// </summary>
     public class DnsHandler : IConnectionHandler
     {
-        public Task ClientConnect(Client client)
+        public Task ClientConnectAsync(Client client, CancellationToken cancellationToken)
         {
             throw new NotImplementedException();
         }
 
-        public Task ClientDisconnect(Client client)
+        public Task ClientDisconnectAsync(Client client, CancellationToken cancellationToken)
         {
             throw new NotImplementedException();
         }
 
-        public Task ClientReceiveData(Client client, byte[] buffer, int len)
+        public Task ClientReceiveDataAsync(Client client, byte[] buffer, int len, CancellationToken cancellationToken)
         {
             throw new NotImplementedException();
         }

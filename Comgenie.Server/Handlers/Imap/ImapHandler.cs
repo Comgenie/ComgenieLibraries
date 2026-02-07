@@ -67,7 +67,7 @@ namespace Comgenie.Server.Handlers.Imap
             ImapGetContentHandler = imapGetContentCallBack;
         }
 
-        public async Task ClientConnect(Client client)
+        public async Task ClientConnectAsync(Client client, CancellationToken cancellationToken)
         {
             client.Data = new ImapClientData()
             {
@@ -77,19 +77,19 @@ namespace Comgenie.Server.Handlers.Imap
 
             try
             {
-                await client.SendString("* OK " + (client.Server?.DefaultDomain ?? "localhost") + " Service Ready\r\n");
+                await client.SendStringAsync("* OK " + (client.Server?.DefaultDomain ?? "localhost") + " Service Ready\r\n");
             }
             catch { } // Just in case the client already disconnected again
         }
 
-        public Task ClientDisconnect(Client client)
+        public Task ClientDisconnectAsync(Client client, CancellationToken cancellationToken)
         {
             Log.Debug(nameof(ImapHandler), "IMAP client disconnected");
             //var data = (ImapClientData)client.Data;
             return Task.CompletedTask;
         }
 
-        public async Task ClientReceiveData(Client client, byte[] buffer, int len)
+        public async Task ClientReceiveDataAsync(Client client, byte[] buffer, int len, CancellationToken cancellationToken)
         {
             var data = (ImapClientData?)client.Data;
             if (data == null)
@@ -224,12 +224,12 @@ namespace Comgenie.Server.Handlers.Imap
                     {
                         Log.Info(nameof(ImapHandler), "IMAP: Login successful as " + parts[2]);
                         data.AuthenticatedUser = parts[2];
-                        await client.SendString(tag + " OK LOGIN completed\r\n");
+                        await client.SendStringAsync(tag + " OK LOGIN completed\r\n");
                     }
                     else
                     {
                         Console.WriteLine("IMAP: Login failed");
-                        await client.SendString(tag + " NO LOGIN failed\r\n");
+                        await client.SendStringAsync(tag + " NO LOGIN failed\r\n");
                     }
                 }
                 else if (parts[1] == "STARTTLS" && client.Server != null) // select [item] [
@@ -237,7 +237,7 @@ namespace Comgenie.Server.Handlers.Imap
                     client.Server.EnableSSLOnClient(client, null, () =>
                     {
                         // Send this message in this callback to make sure no SSL packets is accidentally read before initializing sslstream
-                        client.SendString(tag + " OK Begin TLS negotiation now\r\n").Wait();
+                        client.SendStringAsync(tag + " OK Begin TLS negotiation now\r\n").Wait();
                     });
                 }
                 else if (parts[1] == "AUTHENTICATE") // Set auth method
@@ -248,16 +248,16 @@ namespace Comgenie.Server.Handlers.Imap
                     }
                     else
                     {*/
-                    await client.SendString(tag + " NO\r\n");
+                    await client.SendStringAsync(tag + " NO\r\n");
                     //}
                 }
                 else if (parts[1] == "CAPABILITY")
                 {
                     if (client.StreamIsEncrypted)
-                        await client.SendString("* CAPABILITY IMAP4rev1 AUTH=PLAIN\r\n");
+                        await client.SendStringAsync("* CAPABILITY IMAP4rev1 AUTH=PLAIN\r\n");
                     else
-                        await client.SendString("* CAPABILITY IMAP4rev1 STARTTLS LOGINDISABLED\r\n");
-                    await client.SendString(tag + " OK CAPABILITY completed\r\n"); // IMAP4rev1 STARTTLS UNSELECT IDLE NAMESPACE QUOTA ID XLIST CHILDREN X-GM-EXT-1 XYZZY SASL-IR AUTH=XOAUTH AUTH=XOAUTH2 AUTH=PLAIN AUTH=PLAIN-CLIENTTOKEN
+                        await client.SendStringAsync("* CAPABILITY IMAP4rev1 STARTTLS LOGINDISABLED\r\n");
+                    await client.SendStringAsync(tag + " OK CAPABILITY completed\r\n"); // IMAP4rev1 STARTTLS UNSELECT IDLE NAMESPACE QUOTA ID XLIST CHILDREN X-GM-EXT-1 XYZZY SASL-IR AUTH=XOAUTH AUTH=XOAUTH2 AUTH=PLAIN AUTH=PLAIN-CLIENTTOKEN
                 }
                 else if ((parts[1] == "SELECT" || parts[1] == "EXAMINE") && data.AuthenticatedUser != null && parts.Count > 2) // Select a mailbox and list overview information
                 {
@@ -266,19 +266,19 @@ namespace Comgenie.Server.Handlers.Imap
                     if (ImapItemsHandler != null)
                         items = ImapItemsHandler(data, mailbox);
 
-                    await client.SendString("* FLAGS (\\Answered \\Deleted \\Seen \\Draft)\r\n");  // Flags that can be used in STORE, COPY, and FETCH commands
-                    await client.SendString("* " + items.Count() + " EXISTS\r\n");  // Total number of messages
-                    await client.SendString("* " + items.Where(a => a.Moment > DateTime.UtcNow.AddDays(-3)).Count() + " RECENT\r\n");  // Messages with recent flag set
+                    await client.SendStringAsync("* FLAGS (\\Answered \\Deleted \\Seen \\Draft)\r\n");  // Flags that can be used in STORE, COPY, and FETCH commands
+                    await client.SendStringAsync("* " + items.Count() + " EXISTS\r\n");  // Total number of messages
+                    await client.SendStringAsync("* " + items.Where(a => a.Moment > DateTime.UtcNow.AddDays(-3)).Count() + " RECENT\r\n");  // Messages with recent flag set
                     if (items.Count() > 0)
                     {
                         var first = items.OrderByDescending(a => a.Moment).FirstOrDefault();
                         var firstUnseen = items.OrderByDescending(a => a.Moment).FirstOrDefault(a => !a.Seen);
                         if (firstUnseen != null)
-                            await client.SendString("* OK [UNSEEN " + firstUnseen.UID + "]\r\n");  // Id of the first unseen message
+                            await client.SendStringAsync("* OK [UNSEEN " + firstUnseen.UID + "]\r\n");  // Id of the first unseen message
                         if (first != null)
                         {
-                            await client.SendString("* OK [UIDVALIDITY " + first.UID + "]\r\n");  // Unique identifier validity value, optional
-                            await client.SendString("* OK [UIDNEXT " + first.UID + "]\r\n");  // Predicted next unique identifier value, optional
+                            await client.SendStringAsync("* OK [UIDVALIDITY " + first.UID + "]\r\n");  // Unique identifier validity value, optional
+                            await client.SendStringAsync("* OK [UIDNEXT " + first.UID + "]\r\n");  // Predicted next unique identifier value, optional
                         }
                     }
                     //client.SendString("* OK [PERMANENTFLAGS (\\Deleted \\Seen \\*)]\r\n");  // Flags that can be changed permanently, optional (by default all flags can be changed permanently)
@@ -287,30 +287,30 @@ namespace Comgenie.Server.Handlers.Imap
 
                     if (parts[1] == "SELECT")
                     {
-                        await client.SendString(tag + " OK [READ-WRITE] SELECT completed\r\n");
+                        await client.SendStringAsync(tag + " OK [READ-WRITE] SELECT completed\r\n");
                     }
                     else // Same as select, but read only
                     {
-                        await client.SendString(tag + " OK [READ-ONLY] EXAMINE completed\r\n");
+                        await client.SendStringAsync(tag + " OK [READ-ONLY] EXAMINE completed\r\n");
                     }
                 }
                 else if (parts[1] == "CREATE" && data.AuthenticatedUser != null && parts.Count > 2) // create [mailboxname]
                 {
                     if (MailboxActionCallBack != null)
                         MailboxActionCallBack(data, MailboxAction.Create, parts[2], null);
-                    await client.SendString(tag + " OK CREATE completed\r\n");
+                    await client.SendStringAsync(tag + " OK CREATE completed\r\n");
                 }
                 else if (parts[1] == "DELETE" && data.AuthenticatedUser != null && parts.Count > 2) // delete [mailboxname]
                 {
                     if (MailboxActionCallBack != null)
                         MailboxActionCallBack(data, MailboxAction.Delete, parts[2], null);
-                    await client.SendString(tag + " OK DELETE completed\r\n");
+                    await client.SendStringAsync(tag + " OK DELETE completed\r\n");
                 }
                 else if (parts[1] == "RENAME" && data.AuthenticatedUser != null && parts.Count > 3) // rename [mailboxname] [newmailboxname]
                 {
                     if (MailboxActionCallBack != null)
                         MailboxActionCallBack(data, MailboxAction.Rename, parts[2], parts[3]);
-                    await client.SendString(tag + " OK RENAME completed\r\n");
+                    await client.SendStringAsync(tag + " OK RENAME completed\r\n");
                 }
                 else if (parts[1] == "LIST" && data.AuthenticatedUser != null) // LIST [path] [wildcard]   List all mailboxes/folders
                 {
@@ -319,10 +319,10 @@ namespace Comgenie.Server.Handlers.Imap
                         var mailBoxes = ListMailboxesCallBack(data);
                         foreach (var mailbox in mailBoxes)
                         {
-                            await client.SendString("* LIST (HasNoChildren) \"/\" " + mailbox + "\r\n");
+                            await client.SendStringAsync("* LIST (HasNoChildren) \"/\" " + mailbox + "\r\n");
                         }
                     }
-                    await client.SendString(tag + " OK LIST completed\r\n");
+                    await client.SendStringAsync(tag + " OK LIST completed\r\n");
                     /*A1 list "INBOX/" "*"
                     * LIST (HasNoChildren) "/" INBOX/some_other_folder
                     * LIST (HasNoChildren UnMarked Archive) "/" INBOX/Archive
@@ -359,22 +359,22 @@ namespace Comgenie.Server.Handlers.Imap
                         else if (t == "UIDVALIDITY")
                             resp += space + t + " " + (items.FirstOrDefault()?.UID ?? 0);
                     }
-                    await client.SendString("* STATUS " + mailbox + " (" + resp + ")\r\n");
+                    await client.SendStringAsync("* STATUS " + mailbox + " (" + resp + ")\r\n");
 
                     // List status of the current selected mailbox                                        
-                    await client.SendString(tag + " OK STATUS completed\r\n");
+                    await client.SendStringAsync(tag + " OK STATUS completed\r\n");
                 }
                 else if (parts[1] == "EXPUNGE" && data.AuthenticatedUser != null && data.SelectedMailbox != null)
                 {
                     // Directly delete all items marked for deletion
                     // Send a line for each deleted item
                     // * 5 EXPUNGE
-                    await client.SendString(tag + " OK EXPUNGE completed\r\n");
+                    await client.SendStringAsync(tag + " OK EXPUNGE completed\r\n");
                 }
                 else if (parts[1] == "CLOSE" && data.AuthenticatedUser != null && data.SelectedMailbox != null)
                 {
                     // Deselect mailbox, delete all items marked for deletion
-                    await client.SendString(tag + " OK CLOSE completed\r\n");
+                    await client.SendStringAsync(tag + " OK CLOSE completed\r\n");
                 }
                 else if (parts[1] == "FETCH" && data.AuthenticatedUser != null && parts.Count > 2) // select [sequence set]
                 {
@@ -418,7 +418,7 @@ namespace Comgenie.Server.Handlers.Imap
                             }
                         }
 
-                        await client.SendString("* " + item.UID + " FETCH (" + resp + ")\r\n");
+                        await client.SendStringAsync("* " + item.UID + " FETCH (" + resp + ")\r\n");
                     }
 
                     // UID fetch 1:* (FLAGS)
@@ -427,7 +427,7 @@ namespace Comgenie.Server.Handlers.Imap
                     // The FETCH command retrieves data associated with a message in the mailbox.The data items to be fetched can be either a single atom or a parenthesized list.
 
 
-                    await client.SendString(tag + " OK FETCH completed\r\n");
+                    await client.SendStringAsync(tag + " OK FETCH completed\r\n");
                 }
                 else if (parts[1] == "STORE" && data.AuthenticatedUser != null)
                 {
@@ -440,41 +440,41 @@ namespace Comgenie.Server.Handlers.Imap
                 else if (parts[1] == "UID" && parts.Count >= 3 && data.AuthenticatedUser != null)
                 {
                     // Can be used with COPY/FETCH/STORE, but uses unique ids instead of sequence numbers
-                    await client.SendString(tag + " OK UID " + parts[2] + "completed\r\n");
+                    await client.SendStringAsync(tag + " OK UID " + parts[2] + "completed\r\n");
                 }
                 else if (parts[1] == "SUBSCRIBE" && data.AuthenticatedUser != null) // subscribe [mailboxname]
                 {
-                    await client.SendString(tag + " OK SUBSCRIBE completed\r\n");
+                    await client.SendStringAsync(tag + " OK SUBSCRIBE completed\r\n");
                 }
                 else if (parts[1] == "UNSUBSCRIBE" && data.AuthenticatedUser != null) // unsubscribe [mailboxname]
                 {
-                    await client.SendString(tag + " OK UNSUBSCRIBE completed\r\n");
+                    await client.SendStringAsync(tag + " OK UNSUBSCRIBE completed\r\n");
                 }
                 else if (parts[1] == "LSUB" && data.AuthenticatedUser != null) // list all subscriptions
                 {
-                    await client.SendString(tag + " OK LSUB completed\r\n");
+                    await client.SendStringAsync(tag + " OK LSUB completed\r\n");
 
                 }
                 else if (parts[1] == "CHECK" && data.AuthenticatedUser != null)
                 {
                     // Usually same as NOOP, but we don't have to send any updates
                     // Can be seen as a 'flush any changes to disk' command
-                    await client.SendString(tag + " OK CHECK Completed\r\n");
+                    await client.SendStringAsync(tag + " OK CHECK Completed\r\n");
                 }
                 else if (parts[1] == "NOOP" && data.AuthenticatedUser != null)
                 {
                     // If there are new message updates, send them now
-                    await client.SendString(tag + " OK NOOB\r\n");
+                    await client.SendStringAsync(tag + " OK NOOB\r\n");
                 }
                 else if (parts[1] == "LOGOUT" && data.AuthenticatedUser != null)
                 {
                     data.AuthenticatedUser = null;
-                    await client.SendString(tag + " OK LOGOUT completed\r\n");
+                    await client.SendStringAsync(tag + " OK LOGOUT completed\r\n");
                 }
                 else
                 {
                     Console.WriteLine("Unknown command, StreamIsEncrypted: " + client.StreamIsEncrypted);
-                    await client.SendString(tag + " BAD Incorrect syntax or unsupported command\r\n");
+                    await client.SendStringAsync(tag + " BAD Incorrect syntax or unsupported command\r\n");
                 }
             }
             catch (Exception ex)

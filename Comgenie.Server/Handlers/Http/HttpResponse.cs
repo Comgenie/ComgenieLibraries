@@ -81,14 +81,24 @@ namespace Comgenie.Server.Handlers.Http
         /// Can be used to run some clean-up code after a response has been sent.
         /// </summary>
         public Func<HttpClientData, Task>? CallbackResponseSent { get; set; }
+
+        /// <summary>
+        /// Create a http response with a default 200 OK result.
+        /// </summary>
         public HttpResponse()
         {
 
         }
-        public HttpResponse(int statusCode, object responseObjectCode)
+
+        /// <summary>
+        /// Create a http response with a custom status code and returned json object
+        /// </summary>
+        /// <param name="statusCode">Status code</param>
+        /// <param name="responseObject">Object which will be serialized to JSON automatically. By default this also sets the mime type to application/json</param>
+        public HttpResponse(int statusCode, object responseObject)
         {
             StatusCode = statusCode;
-            ResponseObject = responseObjectCode;
+            ResponseObject = responseObject;
         }
     }
 }
