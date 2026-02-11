@@ -95,7 +95,8 @@ namespace Comgenie.Server.Handlers.Http
                             else
                             {
                                 // Got all data in offset, with msglen
-                                client.ResetTimeout();
+                                client.ResetTimeout(new TimeSpan(0, 30, 0)); 
+
                                 if (opcode == 0x09) // ping
                                 {
                                     await data.SendWebsocketMessage(0x0A, data.IncomingBuffer, offset, msglen, cancellationToken);

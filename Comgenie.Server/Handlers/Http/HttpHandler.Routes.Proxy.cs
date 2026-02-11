@@ -117,7 +117,7 @@ namespace Comgenie.Server.Handlers.Http
                         }
                         catch (Exception e)
                         {
-                            Console.WriteLine(e.Message + "\r\n" + e.StackTrace);
+                            Console.WriteLine("[Proxy error] " + e.Message + "\r\n" + e.StackTrace);
 
                             if (attempt < 2)
                                 continue;
@@ -126,7 +126,7 @@ namespace Comgenie.Server.Handlers.Http
                             {
                                 StatusCode = 500,
                                 ContentType = "text/plain",
-                                Data = Encoding.UTF8.GetBytes("Proxy error: " + e.Message + "\r\n" + e.StackTrace)
+                                Data = Encoding.UTF8.GetBytes("Proxy error")
                             };
                         }
                     }
