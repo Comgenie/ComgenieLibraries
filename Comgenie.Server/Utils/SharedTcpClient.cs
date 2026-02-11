@@ -26,7 +26,7 @@ namespace Comgenie.Server.Utils
         private static int InstanceCount = 0;
         private int CurrentInstanceNumber = 0;
 
-        public async void ConnectAsync(string host, int port, bool ssl, int closeAfterSeconds = 60, CancellationToken cancellationToken = default)
+        public async Task ConnectAsync(string host, int port, bool ssl, int closeAfterSeconds = 60, CancellationToken cancellationToken = default)
         {
             CurrentInstanceNumber = ++InstanceCount;
             // Check if there is any open connection to reuse            
@@ -193,12 +193,12 @@ namespace Comgenie.Server.Utils
 
                 Log.Debug(nameof(SharedTcpClient), "Connecting to unix domain socket path: " + socketPath);
                 client = new SharedTcpClient();
-                client.ConnectAsync(socketPath, 0, false, cancellationToken: cancellationToken);
+                await client.ConnectAsync(socketPath, 0, false, cancellationToken: cancellationToken);
             }
             else
             {
                 client = new SharedTcpClient();
-                client.ConnectAsync(uri.Host, uri.Port, uri.Port == 443, cancellationToken: cancellationToken);
+                await client.ConnectAsync(uri.Host, uri.Port, uri.Port == 443, cancellationToken: cancellationToken);
             }
             
             client.Connection.CanReuse = false;
