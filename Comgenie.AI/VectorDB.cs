@@ -2,15 +2,24 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
+using System.Runtime.Intrinsics;
 using System.Text;
 using System.Threading.Tasks;
 
 namespace Comgenie.AI
 {
-    // Note: This class is mostly AI generated code.
-    
+    /// <summary>
+    /// A simplefied in-memory vector database. 
+    /// This can be used to store data with embeddings, and search for them later using similar embeddings.
+    /// 
+    /// Note: This class is mostly AI generated code.
+    /// </summary>
+    /// <typeparam name="T">Type of the items to store and retrieve</typeparam>
     public class VectorDB<T> : IDisposable where T : notnull
     {
+        /// <summary>
+        /// The dimension size given during initializing this vector db
+        /// </summary>
         public readonly int VectorDimension;
 
         // Internal storage structure
@@ -20,9 +29,11 @@ namespace Comgenie.AI
         private readonly ReaderWriterLockSlim _lock;
 
         /// <summary>
-        /// Initializes the database with a fixed vector dimension.
+        /// Initialize a VectorDB&lt;string&gt; with the given dimension.
+        /// The dimension size can be known by retreiving any embeddings using your embeddings endpoint/model
+        /// as they will be the same for any text size you'll be retrieving embeddings for within that model.
         /// </summary>
-        /// <param name="dimension">The size of the float array for all vectors.</param>
+        /// <param name="dimension">Size of the dimension to initialize this VectorDB with</param>
         public VectorDB(int dimension)
         {
             if (dimension <= 0) throw new ArgumentException("Dimension must be greater than 0");
@@ -33,17 +44,24 @@ namespace Comgenie.AI
         }
 
         /// <summary>
-        /// Adds or Updates a vector entry.
+        /// Adds or Updates a vector entry. The vectors usually come from an embeddings model and should be between -1 and 1. 
         /// </summary>
         public void Upsert(T key, ref string text, float[] vector)
         {
             Upsert(key, text.AsMemory(), vector);
         }
+
+        /// <summary>
+        /// Adds or Updates a vector entry. The vectors usually come from an embeddings model and should be between -1 and 1. 
+        /// </summary>
         public void Upsert(T key, string text, float[] vector)
         {
             Upsert(key, text.AsMemory(), vector);
         }
 
+        /// <summary>
+        /// Adds or Updates a vector entry. The vectors usually come from an embeddings model and should be between -1 and 1. 
+        /// </summary>
         public void Upsert(T key, ReadOnlyMemory<char> text, float[] vector)
         {
             if (vector.Length != VectorDimension)
@@ -51,7 +69,6 @@ namespace Comgenie.AI
 
             // Pre-calculate magnitude to avoid doing it inside the search loop (Optimization)
             float magnitude = CalculateMagnitude(vector);
-
             var item = new VectorItem(key, text, vector, magnitude);
 
             _lock.EnterWriteLock();
@@ -165,6 +182,16 @@ namespace Comgenie.AI
         }
 
         /// <summary>
+        /// Calculate the difference between two equal length float array.
+        /// The float values should be between -1 and 1.
+        /// </summary>
+        /// <param name="a">First float array</param>
+        /// <param name="b">Second float array</param>
+        /// <returns>A score between -1 and 1 giving the similarity of the two floats</returns>
+        public static float CalculateSimilarity(float[] a, float[] b)
+            =>  DotProductSimd(a, b) / (CalculateMagnitude(a) * CalculateMagnitude(b));
+
+        /// <summary>
         /// Calculates Dot Product using SIMD (Single Instruction Multiple Data) via System.Numerics.
         /// </summary>
         private static float DotProductSimd(float[] a, float[] b)
@@ -204,6 +231,10 @@ namespace Comgenie.AI
             return (float)Math.Sqrt(sumSquares);
         }
 
+        /// <summary>
+        /// Enumerate over all existing items within this VectorDB.
+        /// </summary>
+        /// <returns>An ienumerable with the item and the stored vector array (embeddings)</returns>
         public IEnumerable<(T Key, float[] Vector)> AsEnumerable()
         {
             _lock.EnterReadLock();
@@ -221,20 +252,48 @@ namespace Comgenie.AI
             yield break;
         }
 
+        /// <summary>
+        /// Disposes this VectorDB instance.
+        /// </summary>
         public void Dispose()
         {
             _lock?.Dispose();
             GC.SuppressFinalize(this);
         }
     }
+
+    /// <summary>
+    /// A simplefied in-memory vector database. 
+    /// This can be used to store data with embeddings, and search for them later using similar embeddings.
+    /// This is the version to just store and retrieve texts. It is the same as VectorDB&lt;string&gt;
+    /// 
+    /// Note: This class is mostly AI generated code.
+    /// </summary>
     public class VectorDB : VectorDB<string>
     {
+        /// <summary>
+        /// Initialize a VectorDB&lt;string&gt; with the given dimension.
+        /// The dimension size can be known by retreiving any embeddings using your embeddings endpoint/model
+        /// as they will be the same for any text size you'll be retrieving embeddings for within that model.
+        /// </summary>
+        /// <param name="dimension">Size of the dimension to initialize this VectorDB with</param>
         public VectorDB(int dimension) : base(dimension) { }
     }
 
+    /// <summary>
+    /// An item with an attached score
+    /// </summary>
+    /// <typeparam name="T">Type of item to attach a score to</typeparam>
     public class ScoredItem<T>
     {
+        /// <summary>
+        /// Reference to an item which will be scored
+        /// </summary>
         public required T Item { get; set; }
+
+        /// <summary>
+        /// Score
+        /// </summary>
         public required float Score { get; set; }
     }
 }

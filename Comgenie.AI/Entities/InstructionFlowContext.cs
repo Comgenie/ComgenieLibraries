@@ -9,7 +9,7 @@ namespace Comgenie.AI.Entities
         [JsonIgnore]
         internal InstructionFlowPositionContext Current => FlowPositions.Last();
         [JsonIgnore]
-        public CancellationToken? CancellationToken { get; set; }
+        public CancellationToken CancellationToken { get; set; } = default;
         [JsonIgnore]
         public LLMGenerationOptions GenerationOptions { get; set; } = new();
 

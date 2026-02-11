@@ -18,7 +18,7 @@ namespace Comgenie.AI
         /// </summary>
         /// <param name="userMessage">Question to ask to AI</param>
         /// <returns>If succeeded, a LLM response object containing the assistant message.</returns>
-        public async Task<ChatResponse?> GenerateResponseAsync(string userMessage, LLMGenerationOptions? generationOptions = null, CancellationToken? cancellationToken = null)
+        public async Task<ChatResponse?> GenerateResponseAsync(string userMessage, LLMGenerationOptions? generationOptions = null, CancellationToken cancellationToken = default)
         {
             return await GenerateResponseAsync(new List<ChatMessage>()
             {
@@ -35,7 +35,7 @@ namespace Comgenie.AI
         /// <param name="temperature">Optional: Temperature. Change to make the LLM respond more creative or not.</param>
         /// <param name="addResponseToMessageList">Optional: If set to true, the given messages list will be expanded with the assistant response and if applicable: tool responses.</param>
         /// <returns>If succeeded, a LLM response object containing the assistant message.</returns>
-        public async Task<ChatResponse?> GenerateResponseAsync(List<ChatMessage> messages, LLMGenerationOptions? generationOptions = null, CancellationToken? cancellationToken = null)
+        public async Task<ChatResponse?> GenerateResponseAsync(List<ChatMessage> messages, LLMGenerationOptions? generationOptions = null, CancellationToken cancellationToken = default)
         {
             if (generationOptions == null)
                 generationOptions = DefaultGenerationOptions;
@@ -44,8 +44,13 @@ namespace Comgenie.AI
                 messages = messages.ToList(); // This prevents external message lists from getting modified
 
             ChatResponse? response = null;
+            var requestsLeft = generationOptions.ContinueAfterToolCallsLimit ?? Int32.MaxValue;
+
             while (response == null) // Default we only do one request, but tool calls might trigger multiple requests
             {
+                if (requestsLeft-- <= 0)
+                    break;
+
                 response = await ExecuteCompletionRequest(messages, generationOptions, cancellationToken);
                 if (response == null)
                     return response; // Failed even after retries
@@ -91,7 +96,7 @@ namespace Comgenie.AI
         /// <typeparam name="T">Type of an class with Instruction attributes helping the AI to populate the fields</typeparam>
         /// <param name="userMessage">Question to ask to AI</param>
         /// <returns>An instance of T with the populated fields</returns>
-        public async Task<T?> GenerateStructuredResponseAsync<T>(string userMessage, LLMGenerationOptions? generationOptions = null, CancellationToken? cancellationToken = null)
+        public async Task<T?> GenerateStructuredResponseAsync<T>(string userMessage, LLMGenerationOptions? generationOptions = null, CancellationToken cancellationToken = default)
         {
             return await GenerateStructuredResponseAsync<T>(new List<ChatMessage>()
             {
@@ -108,7 +113,7 @@ namespace Comgenie.AI
         /// <param name="includeInstructionAndExampleJson">If set to true, an explanation of the JSON structure of T will be injected in the last user message.</param>
         /// <param name="generationOptions">Optional: Options to control the LLM generation and behaviour within this method. If not set the .DefaultGenerationOptions is used.</param>
         /// <returns>An instance of T with the populated fields</returns>
-        public async Task<T?> GenerateStructuredResponseAsync<T>(List<ChatMessage> messages, bool includeInstructionAndExampleJson = true, LLMGenerationOptions? generationOptions = null, CancellationToken? cancellationToken = null)
+        public async Task<T?> GenerateStructuredResponseAsync<T>(List<ChatMessage> messages, bool includeInstructionAndExampleJson = true, LLMGenerationOptions? generationOptions = null, CancellationToken cancellationToken = default)
         {
             if (includeInstructionAndExampleJson)
             {
@@ -144,7 +149,7 @@ namespace Comgenie.AI
         /// <param name="messages">List of at least 1 message.</param>
         /// <param name="generationOptions">Optional: Options to control the LLM generation and behaviour within this method. If not set the .DefaultGenerationOptions is used.</param>
         /// <returns>If succeeded, a LLM response object containing the assistant message.</returns>
-        private async Task<ChatResponse?> ExecuteCompletionRequest(List<ChatMessage> messages, LLMGenerationOptions? generationOptions = null, CancellationToken? cancellationToken = null)
+        private async Task<ChatResponse?> ExecuteCompletionRequest(List<ChatMessage> messages, LLMGenerationOptions? generationOptions = null, CancellationToken cancellationToken = default)
         {
             if (generationOptions == null)
                 generationOptions = DefaultGenerationOptions;
@@ -215,8 +220,7 @@ namespace Comgenie.AI
             var first = true;
             while (first || CurrentRequestsSecond >= MaxRequestsPerSecond || CurrentRequestsMinute >= MaxRequestsPerMinute)
             {
-                if (cancellationToken.HasValue)
-                    cancellationToken.Value.ThrowIfCancellationRequested();
+                cancellationToken.ThrowIfCancellationRequested();
 
                 var cur = DateTime.UtcNow;
                 if (cur.Second != LastRequest.Second)

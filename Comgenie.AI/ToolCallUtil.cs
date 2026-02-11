@@ -9,7 +9,10 @@ using Comgenie.AI.Entities;
 
 namespace Comgenie.AI
 {
-    // Note: This class is mostly AI generated code.
+    /// <summary>
+    /// A collection of utilities to discover and initialize C# methods as tool calls.
+    /// Use this to build a serializable tool call information object for any c# method
+    /// </summary>
     public static class ToolCallUtil
     {
         /// <summary>
@@ -52,6 +55,13 @@ namespace Comgenie.AI
             return JsonSerializer.Serialize(infos, options);
         }
 
+        /// <summary>
+        /// Generate a tool call information object based on a c# method.
+        /// </summary>
+        /// <param name="method">Reflection object for a c# method</param>
+        /// <param name="methodInstance">Optional: method instance to store at the tool call object</param>
+        /// <param name="methodDelegate">Optional: reference to the c# method to store at the toll call object</param>
+        /// <returns>A tool call information object containing all parameters and descriptions</returns>
         public static ToolCallInfo BuildToolCallInfoFromMethod(MethodInfo method, object? methodInstance, Delegate? methodDelegate=null)
         {
             var methodAttr = method.GetCustomAttribute<ToolCallAttribute>();
@@ -75,6 +85,8 @@ namespace Comgenie.AI
 
             foreach (var param in method.GetParameters())
             {
+                if (param?.Name == null)
+                    continue;
                 var paramAttr = param.GetCustomAttribute<ToolCallAttribute>(inherit: true);
                 var mapped = MapTypeToParameterInfo(param.ParameterType, paramAttr);
 
@@ -253,6 +265,15 @@ namespace Comgenie.AI
             return iface?.GetGenericArguments()[0];
         }
 
+        /// <summary>
+        /// Execute a c# method using the given tool call info and arguments json.
+        /// The arguments json is usually given by an LLM to execute a given tool.
+        /// </summary>
+        /// <param name="tool">A tool call information object for the c# method to call</param>
+        /// <param name="argumentsJson">Arguments to call the c# method with</param>
+        /// <returns>The returned value serialized as json</returns>
+        /// <exception cref="ArgumentNullException">Thrown if the tool is null</exception>
+        /// <exception cref="InvalidOperationException">Thrown with extra information if deserializing went wrong or anything else unexpected happened.</exception>
         public static string ExecuteFunction(ToolCallInfo tool, string argumentsJson)
         {
             var method = tool.MethodInfo;

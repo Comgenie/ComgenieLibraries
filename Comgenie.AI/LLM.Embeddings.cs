@@ -3,6 +3,7 @@ using Comgenie.Util;
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -278,7 +279,7 @@ namespace Comgenie.AI
         /// <param name="chunkSize">Max number of characters of the document to pass to the LLM at once.</param>
         /// <returns>The textual summarized response from the LLM.</returns>
         /// <exception cref="Exception">An exception will be thrown if communication with the LLM fails.</exception>
-        public async Task<string> GenerateDeepDiveDocumentsResponseAsync(string text, int chunkSize=4096, int overlappingSize = 100, LLMGenerationOptions? generationOptions = null, CancellationToken? cancellationToken = null)
+        public async Task<string> GenerateDeepDiveDocumentsResponseAsync(string text, int chunkSize=4096, int overlappingSize = 100, LLMGenerationOptions? generationOptions = null, CancellationToken cancellationToken = default)
         {
             if (DocumentVectorDB == null)
                 return "";
@@ -300,8 +301,7 @@ namespace Comgenie.AI
             {
                 for (var i=0;i < document.Value.Text.Length; i += (chunkSize - overlappingSize))
                 {
-                    if (cancellationToken.HasValue)
-                        cancellationToken.Value.ThrowIfCancellationRequested();
+                    cancellationToken.ThrowIfCancellationRequested();
 
                     var chunk = (i + chunkSize > document.Value.Text.Length) ?
                         document.Value.Text.Substring(i) :
@@ -344,7 +344,7 @@ namespace Comgenie.AI
         /// <param name="text">Text to find related documents for</param>
         /// <param name="generationOptions">Options to control the format and length of the text generated to reference the documents.</param>
         /// <returns>A formatted string with the found documents. This includes their document name, offset within the document and text from the document.</returns>
-        public async Task<string> GenerateRelatedDocumentsSummaryAsync(string text, LLMGenerationOptions? generationOptions = null, CancellationToken? cancellationToken = null)
+        public async Task<string> GenerateRelatedDocumentsSummaryAsync(string text, LLMGenerationOptions? generationOptions = null, CancellationToken cancellationToken = default)
         {
             if (generationOptions == null)
                 generationOptions = DefaultGenerationOptions;
@@ -538,11 +538,21 @@ namespace Comgenie.AI
         /// </summary>
         /// <param name="text">The text to find relevance from</param>
         /// <param name="items">List of documents/items to rank. Note that the .ToString() method will be called for each of these items to find out what text it represents.</param>
+        /// <param name="top_n">Max number of results to return, sorted by highest ranked</param>
+        /// <param name="generationOptions">Optional: Custom generation options to use instead of the default ones</param>
+        /// <param name="cancellationToken">Optional: Cancellation token to cancel the calls to the reranking endpoint</param>
         /// <returns>List of scored items with their relevance score</returns>
-        public async Task<List<ScoredItem<T>>> GenerateRankingsAsync<T>(string text, List<T> items, int top_n=10, LLMGenerationOptions? generationOptions = null, CancellationToken? cancellationToken = null)
+        public async Task<List<ScoredItem<T>>> GenerateRankingsAsync<T>(string text, List<T> items, int top_n=10, LLMGenerationOptions? generationOptions = null, CancellationToken cancellationToken = default)
         {
             if (generationOptions == null)
                 generationOptions = DefaultGenerationOptions;
+
+            if (string.IsNullOrEmpty(ActiveModel.ApiUrlReranking))
+            {
+                Debug.WriteLine("[Warning] No reranking url is set so falling back to pure embeddings relevance.");
+                
+                return items.Take(top_n).Select(a=> new ScoredItem<T>() { Item = a, Score = 1 }).ToList();
+            }
 
             // TODO: Split requests exceeding x tokens across multiple requests and combine them using the score.
 
@@ -570,6 +580,7 @@ namespace Comgenie.AI
                 var str = await resp.Content.ReadAsStringAsync(requestCancellationToken);
                 if (!str.StartsWith("{"))
                     throw new Exception("Invalid LLM response: " + str);
+                Console.WriteLine(str);
 
                 
                 var rerankingResponse = JsonSerializer.Deserialize<RerankingResponse>(str);
@@ -590,8 +601,21 @@ namespace Comgenie.AI
             return results;
         }
 
-        // Extra helper to work with simple string documents directly
-        public Task<List<ScoredItem<string>>> GenerateRankingsAsync(string text, List<string> documents, int top_n = 10, LLMGenerationOptions? generationOptions = null, CancellationToken? cancellationToken = null)
+
+        /// <summary>
+        /// This uses the llama-server reranking feature to rank the given documents based on their relevance to the given text.
+        /// Make sure to have the --reranking flag enabled in llama-server. Recommended arguments: --embeddings --pooling rank --reranking
+        /// 
+        /// Note that it's recommended to use this in combination with embeddings to first filter the documents to a smaller set before reranking.
+        /// The normal embbeddings method just find distances to specific words, while reranking looks at the actual relevance of the document as a whole. 
+        /// </summary>
+        /// <param name="text">The text to find relevance from</param>
+        /// <param name="documents">List of documents (text) to rank.</param>
+        /// <param name="top_n">Max number of results to return, sorted by highest ranked</param>
+        /// <param name="generationOptions">Optional: Custom generation options to use instead of the default ones</param>
+        /// <param name="cancellationToken">Optional: Cancellation token to cancel the calls to the reranking endpoint</param>
+        /// <returns>List of scored items with their relevance score</returns>
+        public Task<List<ScoredItem<string>>> GenerateRankingsAsync(string text, List<string> documents, int top_n = 10, LLMGenerationOptions? generationOptions = null, CancellationToken cancellationToken = default)
         {
             return GenerateRankingsAsync<string>(text, documents, top_n, generationOptions, cancellationToken);
         }

@@ -17,7 +17,7 @@ namespace Comgenie.AI
         {
             return new InstructionFlow(this, name);
         }
-        public async Task<InstructionFlowContext> GenerateUsingFlowAsync(InstructionFlow flow, InstructionFlowContext? resumeFromContext=null, CancellationToken? cancellationToken = null)
+        public async Task<InstructionFlowContext> GenerateUsingFlowAsync(InstructionFlow flow, InstructionFlowContext? resumeFromContext=null, CancellationToken cancellationToken = default)
         {
             var context = resumeFromContext ?? new InstructionFlowContext();
             if (resumeFromContext != null)
@@ -42,8 +42,7 @@ namespace Comgenie.AI
             
             while (context.FlowPositions.Count > 0)
             {
-                if (cancellationToken.HasValue)
-                    cancellationToken.Value.ThrowIfCancellationRequested();
+                cancellationToken.ThrowIfCancellationRequested();
 
                 var currentFlow = context.Current.Flow;
 
@@ -245,11 +244,11 @@ namespace Comgenie.AI
             RelatedFlows.Add(flow);
             return this;
         }
-        public Task<InstructionFlowContext> GenerateAsync(CancellationToken? cancellationToken = null)
+        public Task<InstructionFlowContext> GenerateAsync(CancellationToken cancellationToken = default)
         {
             return LLMInstance.GenerateUsingFlowAsync(this, null, cancellationToken);
         }
-        public Task<InstructionFlowContext> GenerateWithContextAsync(InstructionFlowContext resumeFromContext, CancellationToken? cancellationToken = null)
+        public Task<InstructionFlowContext> GenerateWithContextAsync(InstructionFlowContext resumeFromContext, CancellationToken cancellationToken = default)
         {
             return LLMInstance.GenerateUsingFlowAsync(this, resumeFromContext, cancellationToken);
         }

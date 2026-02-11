@@ -21,7 +21,7 @@ namespace Comgenie.AI
         /// <param name="generationOptions">Optional: Custom generation options, uses .DefaultGenerationOptions if not set</param>
         /// <param name="cancellationToken">Optional: Cancellation token to cancel the flow generation</param>
         /// <returns>Generated instruction flow if succeeded</returns>
-        public async Task<InstructionFlow?> GenerateSolutionFlowAsync(List<ChatMessage> messages, LLMGenerationOptions? generationOptions = null, CancellationToken? cancellationToken = null)
+        public async Task<InstructionFlow?> GenerateSolutionFlowAsync(List<ChatMessage> messages, LLMGenerationOptions? generationOptions = null, CancellationToken cancellationToken = default)
         {
             if (generationOptions == null)
                 generationOptions = DefaultGenerationOptions;
@@ -89,7 +89,7 @@ namespace Comgenie.AI
         /// </summary>
         /// <param name="messages">List of messages, requiring at least 1 user message</param>
         /// <returns>The last assistant response from the LLM</returns>
-        public async Task<InstructionFlowContext?> GenerateSolutionAsync(List<ChatMessage> messages, LLMGenerationOptions? generationOptions = null, CancellationToken? cancellationToken = null)
+        public async Task<InstructionFlowContext?> GenerateSolutionAsync(List<ChatMessage> messages, LLMGenerationOptions? generationOptions = null, CancellationToken cancellationToken = default)
         {
             if (generationOptions == null)
                 generationOptions = DefaultGenerationOptions;

@@ -1,18 +1,18 @@
 ﻿namespace Comgenie.AI.Entities
 {
-    public class EmbeddingsResponse
+    internal class EmbeddingsResponse
     {
         public string model { get; set; }
         public EmbeddingsUsageResponse usage { get; set; }
         public List<EmbeddingsDataResponse> data { get; set; }
     }
 
-    public class EmbeddingsUsageResponse
+    internal class EmbeddingsUsageResponse
     {
         public int prompt_tokens { get; set; }
         public int total_tokens { get; set; }
     }
-    public class EmbeddingsDataResponse
+    internal class EmbeddingsDataResponse
     {
         public float[] embedding { get; set; }
     }
