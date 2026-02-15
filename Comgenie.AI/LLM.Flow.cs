@@ -13,10 +13,23 @@ namespace Comgenie.AI
 {
     public partial class LLM
     {
+        /// <summary>
+        /// Create a new flow using the builders pattern. 
+        /// </summary>
+        /// <param name="name">Optional: Name for this flow. This can be used when resuming from an existing context</param>
+        /// <returns>An instruction flow object where steps can be added using the builders pattern</returns>
         public InstructionFlow BuildFlow(string? name=null)
         {
             return new InstructionFlow(this, name);
         }
+
+        /// <summary>
+        /// Executes the given instruction flow till completion or till it's requested to stop early within one of the steps.
+        /// </summary>
+        /// <param name="flow">Instruction flow to follow</param>
+        /// <param name="resumeFromContext">If stopped early, the context can be used to resume from that point</param>
+        /// <param name="cancellationToken">Cancellation token to stop the execution of this flow early</param>
+        /// <returns>Context with all the LLM messages used, and position within the flow</returns>
         public async Task<InstructionFlowContext> GenerateUsingFlowAsync(InstructionFlow flow, InstructionFlowContext? resumeFromContext=null, CancellationToken cancellationToken = default)
         {
             var context = resumeFromContext ?? new InstructionFlowContext();
@@ -72,6 +85,10 @@ namespace Comgenie.AI
         }
     }
 
+    /// <summary>
+    /// A container for instruction steps which can be executed one by one, repeated and expanded.
+    /// Use llm.BuildFlow() to easily create a new flow and attach it to that llm instance.
+    /// </summary>
     public class InstructionFlow
     {
         private LLM LLMInstance { get; set; }

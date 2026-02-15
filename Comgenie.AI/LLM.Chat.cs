@@ -1,12 +1,8 @@
 ﻿using Comgenie.AI.Entities;
-using System;
-using System.Collections.Generic;
 using System.Diagnostics;
-using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Threading.Tasks;
 
 namespace Comgenie.AI
 {
@@ -115,6 +111,9 @@ namespace Comgenie.AI
         /// <returns>An instance of T with the populated fields</returns>
         public async Task<T?> GenerateStructuredResponseAsync<T>(List<ChatMessage> messages, bool includeInstructionAndExampleJson = true, LLMGenerationOptions? generationOptions = null, CancellationToken cancellationToken = default)
         {
+            if (generationOptions == null)
+                generationOptions = DefaultGenerationOptions;
+
             if (includeInstructionAndExampleJson)
             {
                 var jsonExample = JsonUtil.GetExampleJson<T>();
@@ -127,17 +126,44 @@ namespace Comgenie.AI
                 }
             }
 
-            var chat = await GenerateResponseAsync(messages, generationOptions, cancellationToken);
+            // We will retry a few times as some LLM models aren't good at following the json syntax
+            bool extraReminder = false;
+            for (var i = 0; i < generationOptions.FailedRequestRetryCount; i++)
+            {
+                try
+                {
+                    var chat = await GenerateResponseAsync(messages, generationOptions, cancellationToken);
 
-            if (chat == null || chat.choices == null || chat.choices.Count == 0)
-                throw new Exception("No response from AI");
+                    if (chat == null || chat.choices == null || chat.choices.Count == 0)
+                        throw new Exception("No response from AI");
 
-            // Check if T is list or array
-            if ((typeof(T).IsGenericType && typeof(T).GetGenericTypeDefinition() == typeof(List<>)) || typeof(T).IsArray)
-                return chat.LastAsJsonArray<T>();
+                    // Check if T is list or array
+                    if ((typeof(T).IsGenericType && typeof(T).GetGenericTypeDefinition() == typeof(List<>)) || typeof(T).IsArray)
+                        return chat.LastAsJsonArray<T>();
 
-            // It's a normal object instead
-            return chat.LastAsJsonObject<T>();
+                    // It's a normal object instead
+                    return chat.LastAsJsonObject<T>();
+                }
+                catch (Exception)
+                {
+                    if (messages.LastOrDefault() is ChatAssistantMessage assistantMessage)
+                        messages.Remove(assistantMessage);
+
+                    if (!extraReminder && messages.LastOrDefault() is ChatUserMessage userMessage) {
+                        var textContent = userMessage.content.FirstOrDefault(a => a is ChatMessageTextContent) as ChatMessageTextContent;
+                        if (textContent != null)
+                        {
+                            textContent.text += $"\r\n\r\nMake sure to return a valid JSON object without any added formatting or comments.";
+                            extraReminder = true;
+                        }
+                    }
+
+                    if (i + 1 == generationOptions.FailedRequestRetryCount)
+                        throw;
+                }
+            }
+
+            return default(T);
         }
 
 
@@ -186,16 +212,23 @@ namespace Comgenie.AI
 
             if (MaxContentLength.HasValue)
                 TrimOldMessages(messages, MaxContentLength.Value - 1000, generationOptions); // Space for response
-
-            var completionRequest = new
+            var completionRequest = new Dictionary<string, object>();
+            completionRequest["model"] = ActiveModel.Name;
+            completionRequest["temperature"] = generationOptions.Temperature;
+            completionRequest["messages"] = messages;
+            if (generationOptions.IncludeAvailableTools)
             {
-                model = ActiveModel.Name,
-                temperature = generationOptions.Temperature,
-                messages = messages,
-                tools = generationOptions.IncludeAvailableTools ? Tools : new(),
-                tool_choice = "auto",
-                stop = generationOptions.StopEarlyTextSequences
-            };
+                completionRequest["tools"] = Tools;
+                completionRequest["tool_choice"] = "auto";
+            }
+
+            if (generationOptions.StopEarlyTextSequences != null)
+                completionRequest["stop"] = generationOptions.StopEarlyTextSequences;
+
+            foreach (var item in generationOptions.ExtraRequestParameters)
+            {
+                completionRequest[item.Key] = item.Value;
+            }
 
             var txtContent = JsonSerializer.Serialize(completionRequest, new JsonSerializerOptions()
             {

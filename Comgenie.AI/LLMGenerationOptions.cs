@@ -22,6 +22,12 @@ namespace Comgenie.AI
         public float Temperature { get; set; } = 1f;
 
         /// <summary>
+        /// Extra parameters included in the root of the completions request.
+        /// This can be used to for example include settings like min_p, repeat_penalty, presence_penalty and dry_multiplier in the quest.
+        /// </summary>
+        public Dictionary<string, object> ExtraRequestParameters { get; set; } = new();
+
+        /// <summary>
         /// When set to true (default) any LLM response will be added to the list instance passed into the Generate-methods.
         /// </summary>
         public bool AddResponseToMessageList { get; set; } = true;

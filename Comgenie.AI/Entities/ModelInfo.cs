@@ -69,8 +69,19 @@ namespace Comgenie.AI.Entities
         /// </summary>
         public enum ModelServerType
         {
+            /// <summary>
+            /// The endpoint is the completions endpoint hosted by a llama-server instance
+            /// </summary>
             LlamaCpp = 1,
+
+            /// <summary>
+            /// The endpoint is the completions endpoint hosted by OpenAI directly (not using Azure)
+            /// </summary>
             OpenAI = 2,
+
+            /// <summary>
+            /// The endpoint is the completions endpoint hosted by Azure OpenAI
+            /// </summary>
             AzureOpenAI = 3,
         }
 
