@@ -326,7 +326,7 @@ namespace Comgenie.AI
                 }
 
                 return deserialized;
-            }, generationOptions.FailedRequestRetryCount, cancellationToken);
+            }, generationOptions, cancellationToken);
         }
 
         /// <summary>

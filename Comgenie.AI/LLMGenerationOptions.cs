@@ -28,6 +28,12 @@ namespace Comgenie.AI
         public Dictionary<string, object> ExtraRequestParameters { get; set; } = new();
 
         /// <summary>
+        /// Request timeout for an individual completions request.
+        /// By default it's set to 10 minutes.
+        /// </summary>
+        public TimeSpan RequestTimeout { get; set; } = new(0,10,0);
+
+        /// <summary>
         /// When set to true (default) any LLM response will be added to the list instance passed into the Generate-methods.
         /// </summary>
         public bool AddResponseToMessageList { get; set; } = true;

@@ -90,19 +90,19 @@ namespace Comgenie.AI
                 httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", ActiveModel.ApiKey);
             else
                 httpClient.DefaultRequestHeaders.TryAddWithoutValidation("api-key", ActiveModel.ApiKey);
-            httpClient.Timeout = new TimeSpan(0, 2, 0); // 4 hours
             return httpClient;
         }
         
-        private async Task<T> ExecuteAndRetryHttpRequestIfFailedAsync<T>(Func<HttpClient, CancellationToken, Task<T>> executionHandler, int attempts, CancellationToken? cancellationToken = null)
+        private async Task<T> ExecuteAndRetryHttpRequestIfFailedAsync<T>(Func<HttpClient, CancellationToken, Task<T>> executionHandler, LLMGenerationOptions generationOptions, CancellationToken? cancellationToken = null)
         {
             var httpClient = GetHttpClient();
-            for (var i = 0; i < attempts; i++)
+            httpClient.Timeout = generationOptions.RequestTimeout;
+            for (var i = 0; i < generationOptions.FailedRequestRetryCount; i++)
             {
                 if (i > 0)
                     await Task.Delay(5000 * i); // Exponential backoff
                 CancellationTokenSource cts = new CancellationTokenSource();
-                cts.CancelAfter(new TimeSpan(0, 2, 0)); // Cancel after 2 minutes
+                cts.CancelAfter(generationOptions.RequestTimeout); // Cancel after 2 minutes
 
                 var newCancellationToken = cts.Token;
 
@@ -116,8 +116,8 @@ namespace Comgenie.AI
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine("Failed to execute HTTP request: " + ex.ToString() + ", Attempt " + (i + 1) + "/" + attempts);
-                    if (i + 1 == attempts)
+                    Debug.WriteLine("Failed to execute HTTP request: " + ex.ToString() + ", Attempt " + (i + 1) + "/" + generationOptions.FailedRequestRetryCount);
+                    if (i + 1 == generationOptions.FailedRequestRetryCount)
                         throw;
                 }
 

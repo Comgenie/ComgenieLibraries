@@ -524,7 +524,7 @@ namespace Comgenie.AI
                     throw new Exception("Failed to deserialize LLM response: " + str);
 
                 return embeddingsResponse;
-            }, generationOptions.FailedRequestRetryCount, cancellationToken);
+            }, generationOptions, cancellationToken);
             return deserialized!.data.First().embedding;
             // {"model":"llama-cpp","object":"list","usage":{"prompt_tokens":6,"total_tokens":6},"data":[{"embedding":[0.007257496938109398,0.001204345258884132, 
         }
@@ -596,7 +596,7 @@ namespace Comgenie.AI
                     });
                 }
                 return results.Where(a=> a.Score >= (generationOptions?.DocumentReferencingRelevanceThreshold ?? 0.75)).OrderByDescending(a => a.Score).ToList();
-            }, generationOptions.FailedRequestRetryCount, cancellationToken);
+            }, generationOptions, cancellationToken);
             
             return results;
         }
