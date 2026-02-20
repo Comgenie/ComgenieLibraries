@@ -23,7 +23,7 @@ namespace Comgenie.AI
         public readonly int VectorDimension;
 
         // Internal storage structure
-        private record VectorItem(T Key, ReadOnlyMemory<char> Text, float[] Vector, float Magnitude);
+        private record VectorItem(T Key, float[] Vector, float Magnitude);
 
         private readonly Dictionary<T, VectorItem> _storage;
         private readonly ReaderWriterLockSlim _lock;
@@ -46,30 +46,14 @@ namespace Comgenie.AI
         /// <summary>
         /// Adds or Updates a vector entry. The vectors usually come from an embeddings model and should be between -1 and 1. 
         /// </summary>
-        public void Upsert(T key, ref string text, float[] vector)
-        {
-            Upsert(key, text.AsMemory(), vector);
-        }
-
-        /// <summary>
-        /// Adds or Updates a vector entry. The vectors usually come from an embeddings model and should be between -1 and 1. 
-        /// </summary>
-        public void Upsert(T key, string text, float[] vector)
-        {
-            Upsert(key, text.AsMemory(), vector);
-        }
-
-        /// <summary>
-        /// Adds or Updates a vector entry. The vectors usually come from an embeddings model and should be between -1 and 1. 
-        /// </summary>
-        public void Upsert(T key, ReadOnlyMemory<char> text, float[] vector)
+        public void Upsert(T key, float[] vector)
         {
             if (vector.Length != VectorDimension)
                 throw new ArgumentException($"Vector size must be {VectorDimension}");
 
             // Pre-calculate magnitude to avoid doing it inside the search loop (Optimization)
             float magnitude = CalculateMagnitude(vector);
-            var item = new VectorItem(key, text, vector, magnitude);
+            var item = new VectorItem(key, vector, magnitude);
 
             _lock.EnterWriteLock();
             try

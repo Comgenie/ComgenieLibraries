@@ -75,7 +75,7 @@ namespace AIExample
             {
                 var text = randomFacts[i];
                 embeddings = await llm.GenerateEmbeddingsAsync(text);
-                vectorDb.Upsert("Fact " + i, text, embeddings);
+                vectorDb.Upsert("Fact " + i, embeddings);
             }
 
             // Now search for the most relevant fact embeddings-wise (token distance)

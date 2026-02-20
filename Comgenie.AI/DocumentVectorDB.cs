@@ -52,7 +52,7 @@
 
             documentSource.References.Add(sourceRef);
 
-            Upsert(sourceRef, documentSource.Text.AsMemory(offset, count), vector);
+            Upsert(sourceRef, vector);
         }
 
         public List<ScoredItem<DocumentSourceReference>> CombineCloseResults(List<ScoredItem<DocumentSourceReference>> items, int margin = 0)
