@@ -8,7 +8,7 @@
 		<Authors>Comgenie</Authors>
 		<Company>Comgenie</Company>
 		<Description>Optional extension to add JavaScript support to Comgenie.AI</Description>
-		<Version>2026.02.04.1</Version>
+		<Version>2026.02.21.1</Version>
 		<RepositoryUrl>https://github.com/Comgenie/ComgenieLibraries.git</RepositoryUrl>
 		<PackageProjectUrl>https://github.com/Comgenie/ComgenieLibraries</PackageProjectUrl>
 		<PackageIcon>icon.png</PackageIcon>

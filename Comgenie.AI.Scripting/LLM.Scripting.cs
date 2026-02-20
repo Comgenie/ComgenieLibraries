@@ -11,9 +11,13 @@ using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using System.Threading;
 using static Comgenie.AI.InstructionFlow;
+using Jint;
 
 namespace Comgenie.AI
 {
+    /// <summary>
+    /// Extension methods to offer script generation capabilities to LLM instances.
+    /// </summary>
     public static class LLMScriptingExtensions
     {
 
@@ -22,8 +26,10 @@ namespace Comgenie.AI
         /// </summary>
         /// <param name="messages">List of at least 1 message ending with a user message. Note, this method will always expand this message list.</param>
         /// <param name="interactiveGeneration">Inject console log and statement outputs into the generated javascript to help the assistant during generation. Note that this executes the statements directly using Jint.</param>
+        /// <param name="generationOptions">Generation options to use. If null, the default generation options of the LLM instance will be used. Note that some settings will be overridden when interactiveGeneration is true.</param>
+        /// <param name="cancellationToken">Cancellation token to stop the generation process and script evaluation.</param>
         /// <returns>String containing the requested script.</returns>
-        public static async Task<string> GenerateScriptAsync(this LLM llm, List<ChatMessage> messages, bool interactiveGeneration = false, LLMGenerationOptions? generationOptions = null, CancellationToken? cancellationToken = null)
+        public static async Task<string> GenerateScriptAsync(this LLM llm, List<ChatMessage> messages, bool interactiveGeneration = false, LLMGenerationOptions? generationOptions = null, CancellationToken cancellationToken = default)
         {
             if (generationOptions == null)
                 generationOptions = llm.DefaultGenerationOptions;
@@ -45,7 +51,10 @@ namespace Comgenie.AI
 
             // TODO: Find out a way to set the mysteriously missing CancellationToken for script execution
 
-            var engine = new Jint.Engine().SetValue("console", console);
+            var engine = new Jint.Engine(options =>
+            {
+                options.CancellationToken(cancellationToken);
+            }).SetValue("console", console);
 
             if (generationOptions.IncludeAvailableTools)
             {
@@ -86,8 +95,7 @@ namespace Comgenie.AI
 
                 while (true)
                 {
-                    if (cancellationToken.HasValue)
-                        cancellationToken.Value.ThrowIfCancellationRequested();
+                    cancellationToken.ThrowIfCancellationRequested();
 
                     chat = await llm.GenerateResponseAsync(messages, generationOptions, cancellationToken);
 
@@ -122,9 +130,8 @@ namespace Comgenie.AI
                                 // Currently generating a script, execute the last line and return output if applicable
                                 Console.WriteLine("Script line: " + lastLineScript);
                                 scriptToExecute += lastLineScript + "\r\n";
-
-                                if (cancellationToken.HasValue)
-                                    cancellationToken.Value.ThrowIfCancellationRequested();
+                                
+                                cancellationToken.ThrowIfCancellationRequested();
 
                                 try
                                 {
@@ -180,7 +187,16 @@ namespace Comgenie.AI
             return "";
         }
 
-        public static async Task<ChatResponse?> GenerateResponseUsingScriptAsync(this LLM llm, List<ChatMessage> messages, LLMGenerationOptions? generationOptions = null, CancellationToken? cancellationToken = null)
+        /// <summary>
+        /// Generates a chat response by first creating a script from the provided messages and then using that script
+        /// to formulate a response with the language model.
+        /// </summary>
+        /// <param name="llm">The language model instance used to generate the script and the final response. Cannot be null.</param>
+        /// <param name="messages">A list of chat messages, should end with an ChatUserMessage with an instruction.</param>
+        /// <param name="generationOptions">Generation options to use. If null, the default generation options of the LLM instance will be used. </param>
+        /// <param name="cancellationToken">A cancellation token that can be used to cancel the generation request and script execution.</param>
+        /// <returns>Chat response containing the assistant final response.</returns>
+        public static async Task<ChatResponse?> GenerateResponseUsingScriptAsync(this LLM llm, List<ChatMessage> messages, LLMGenerationOptions? generationOptions = null, CancellationToken cancellationToken = default)
         {
             var script = await GenerateScriptAsync(llm, messages, true, generationOptions, cancellationToken);
 
@@ -189,7 +205,17 @@ namespace Comgenie.AI
 
             return resp;
         }
-        public static async Task<ChatResponse?> GenerateResponseUsingScriptAsync(this LLM llm, string instruction, LLMGenerationOptions? generationOptions = null, CancellationToken? cancellationToken = null)
+
+        /// <summary>
+        /// Generates a chat response by first creating a script from the provided messages and then using that script
+        /// to formulate a response with the language model.
+        /// </summary>
+        /// <param name="llm">The language model instance used to generate the script and the final response. Cannot be null.</param>
+        /// <param name="instruction">User instruction for the llm, will be used to generate a script and the final answer</param>
+        /// <param name="generationOptions">Generation options to use. If null, the default generation options of the LLM instance will be used. </param>
+        /// <param name="cancellationToken">A cancellation token that can be used to cancel the generation request and script execution.</param>
+        /// <returns>Chat response containing the assistant final response.</returns>
+        public static async Task<ChatResponse?> GenerateResponseUsingScriptAsync(this LLM llm, string instruction, LLMGenerationOptions? generationOptions = null, CancellationToken cancellationToken = default)
         {
             var messages = new List<ChatMessage>();
             messages.Add(new ChatUserMessage(instruction));
@@ -201,11 +227,16 @@ namespace Comgenie.AI
         /// </summary>
         /// <param name="llm">LLM instance with (optionally) added tool calls</param>
         /// <param name="script">Script excluding any formatting tags</param>
+        /// <param name="cancellationToken">Cancellation token to stop the script execution.</param>
         /// <returns>Output of the last statement within the script.</returns>
-        public static async Task<ScriptResult> ExecuteScriptAsync(this LLM llm, string script, CancellationToken? cancellationToken = null)
+        public static async Task<ScriptResult> ExecuteScriptAsync(this LLM llm, string script, CancellationToken cancellationToken = default)
         {
             var console = new ConsoleMethods();
-            var engine = new Jint.Engine().SetValue("console", console);
+            var engine = new Jint.Engine(options =>
+            {
+                options.CancellationToken(cancellationToken);
+            }).SetValue("console", console);
+            
             foreach (var tool in llm.Tools)
             {
                 if (tool.Function == null || tool.MethodDelegate == null)
@@ -234,10 +265,10 @@ namespace Comgenie.AI
         /// <summary>
         /// Add a step to this instruction flow to generate a script.
         /// </summary>
-        /// <param name="flow"></param>
-        /// <param name="message"></param>
-        /// <param name="answerHandler"></param>
-        /// <returns></returns>
+        /// <param name="flow">The flow to add this script step to</param>
+        /// <param name="message">User message containing the instruction to generate a script</param>
+        /// <param name="answerHandler">Optional: Handler to do something with the answer and control flow progression</param>
+        /// <returns>This flow with the added script step</returns>
         public static InstructionFlow AddScriptStep(this InstructionFlow flow, ChatUserMessage message, Action<InstructionFlowScriptAnswer>? answerHandler = null)
         {
             if (answerHandler == null)
@@ -258,6 +289,14 @@ namespace Comgenie.AI
 
             return flow;
         }
+
+        /// <summary>
+        /// Add a step to this instruction flow to generate a script and then answer a question using that script.
+        /// </summary>
+        /// <param name="flow">The flow to add this script step to</param>
+        /// <param name="message">User message containing the instruction to generate a script/answer</param>
+        /// <param name="answerHandler">Optional: Handler to do something with the final answer and control flow progression</param>
+        /// <returns>This flow with the added script step</returns>
         public static InstructionFlow AddResponseUsingScriptStep(this InstructionFlow flow, ChatUserMessage message, Action<InstructionFlowTextAnswer>? answerHandler = null)
         {
             if (answerHandler == null)

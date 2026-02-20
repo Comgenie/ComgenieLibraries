@@ -290,12 +290,23 @@ namespace Comgenie.AI
                         break;
                 }
             }
+
+            /// <summary>
+            /// Proceed to the next step after this step has finished executing (default).
+            /// </summary>
+            /// <param name="includeHistory">If set to true, all previous assistant/user messages will be kept in the context</param>
             public void Proceed(bool includeHistory = true)
             {
                 if (!includeHistory)
                     FlowContext.Messages.Clear();
                 FlowContext.Current.NextStep = FlowContext.Current.CurrentStep + 1; // Default
             }
+
+            /// <summary>
+            /// Retry the current step with an optional extra instruction.
+            /// </summary>
+            /// <param name="customInstruction">Optional: Custom new instruction for the llm to correct itself</param>
+            /// <param name="keepFailedMessage">If set to true, the assistent message will be kept.</param>
             public void Retry(string? customInstruction = null, bool keepFailedMessage = true)
             {
                 if (!keepFailedMessage)
@@ -306,10 +317,27 @@ namespace Comgenie.AI
                 
                 FlowContext.Current.NextStep = FlowContext.Current.CurrentStep;
             }
+
+            /// <summary>
+            /// Restart the flow from the first step
+            /// </summary>
             public void Restart()
                 => FlowContext.Current.NextStep = 0;
+
+            /// <summary>
+            /// Go to a specific step (starting at 0, in order of adding it to the flow).
+            /// </summary>
+            /// <param name="step">Step to go to, starting at 0</param>
             public void Goto(int step)
                 => FlowContext.Current.NextStep = step;
+
+            /// <summary>
+            /// Go to a specific step within a related flow.
+            /// </summary>
+            /// <param name="flowName">Name of the related flow added to this flow.</param>
+            /// <param name="flowStep">Step to go to, starting at 0</param>
+            /// <param name="returnToCurrentFlowAfterExecution">Set to true to return to the current flow after finishing the other flow</param>
+            /// <exception cref="Exception">Throws an exception if the related flow was not found</exception>
             public void Goto(string flowName, int flowStep = 0, bool returnToCurrentFlowAfterExecution = false)
             {
                 var referencedFlow = FlowContext.Current.Flow.RelatedFlows.FirstOrDefault(a => a.Name == flowName);
@@ -317,6 +345,12 @@ namespace Comgenie.AI
                     throw new Exception("Referenced flow " + flowName + " not found. Make sure it is referenced correctly in the building using .RelatedFlow() ");
                 Goto(referencedFlow, flowStep, returnToCurrentFlowAfterExecution);
             }
+            /// <summary>
+            /// Go to a specific step within a related flow.
+            /// </summary>
+            /// <param name="flow">Other (related) flow.</param>
+            /// <param name="flowStep">Step to go to, starting at 0</param>
+            /// <param name="returnToCurrentFlowAfterExecution">Set to true to return to the current flow after finishing the other flow</param>
             public void Goto(InstructionFlow flow, int flowStep = 0, bool returnToCurrentFlowAfterExecution = false)
             {
                 if (returnToCurrentFlowAfterExecution)
