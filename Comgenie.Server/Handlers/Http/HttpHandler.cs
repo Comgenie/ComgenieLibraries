@@ -23,7 +23,7 @@ namespace Comgenie.Server.Handlers.Http
     {
         internal Dictionary<string, Route> Routes = new Dictionary<string, Route>();
         private Dictionary<string, string> DomainAliases = new Dictionary<string, string>(); // Alias domain -> main domain        
-        private List<Action<HttpClientData, HttpResponse>> PostProcessors = new List<Action<HttpClientData, HttpResponse>>();
+        private List<Func<HttpClientData, HttpResponse, Task>> PostProcessors = new List<Func<HttpClientData, HttpResponse, Task>>();
 
         // Enable GZip compression for static text files 
         public string[] EnableGZipCompressionContentTypes = new string[] { "text/plain", "application/json", "text/html", "image/svg+xml", "application/xml", "text/css", "text/javascript" };
@@ -47,7 +47,7 @@ namespace Comgenie.Server.Handlers.Http
                 await data.DisconnectedHandlerAsync(data);
         }
 
-        public void AddPostProcessor(Action<HttpClientData, HttpResponse> postProcessor)
+        public void AddPostProcessor(Func<HttpClientData, HttpResponse, Task> postProcessor)
         {
             PostProcessors.Add(postProcessor);
         }
@@ -368,7 +368,7 @@ namespace Comgenie.Server.Handlers.Http
             if (response?.ResponseFinished == true)
             {
                 foreach (var processor in PostProcessors)
-                    processor(data, response);
+                    await processor(data, response);
 
                 Log.Info(nameof(HttpHandler), "Forwarded response: " + response.StatusCode);
 
@@ -458,7 +458,7 @@ namespace Comgenie.Server.Handlers.Http
 
 
             foreach (var processor in PostProcessors)
-                processor(data, response);
+                await processor(data, response); // TODO: Run in background but don't clean up the Client object until after it's finished!
 
             var codeText = ((HttpStatusCode)response.StatusCode).ToString();
 

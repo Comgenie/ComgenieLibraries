@@ -22,7 +22,8 @@ namespace Comgenie.Server.Handlers.Http
         /// <param name="shouldInterceptHandler">Callback to indicate if you want to intercept this request response.</param>
         /// <param name="interceptHandler">Actual intercept handler, should return the modified contents to return to the client.</param>
         /// <param name="shouldSendForwardHeaders">Include X-Forwarded-* headers to the external host.</param>
-        public void AddProxyRoute(string domain, string path, string targetUrl, Func<(string requestPath, string responseHeaders), bool>? shouldInterceptHandler = null, Func<(string requestPath, string responseHeaders, string responseContent), string>? interceptHandler = null, bool shouldSendForwardHeaders = true)
+        /// <param name="keepConnectionAlive">Set to true (default) if the connection to the target server should be kept alive after a request. This improves request speed a lot and should only be set to false due to non-complaint server behaviour.</param>
+        public void AddProxyRoute(string domain, string path, string targetUrl, Func<(string requestPath, string responseHeaders), bool>? shouldInterceptHandler = null, Func<(string requestPath, string responseHeaders, string responseContent), string>? interceptHandler = null, bool shouldSendForwardHeaders = true, bool keepConnectionAlive = true)
         {
             if (!path.StartsWith("/"))
                 path = "/" + path;
@@ -39,6 +40,9 @@ namespace Comgenie.Server.Handlers.Http
                     // We'll do 2 attempts as the sharedtcpclient might break in some non-complaint http servers
                     for (var attempt = 1; attempt <= 2; attempt++)
                     {
+                        if (attempt > 1 && data.DataStream != null)
+                            data.DataStream.Position = 0;
+
                         try
                         {
                             // Build request
@@ -77,6 +81,9 @@ namespace Comgenie.Server.Handlers.Http
                             
                             using (var responseStream = await SharedTcpClient.ExecuteHttpRequest(targetUrl, request.ToString(), data.DataStream, cancellationToken))
                             {
+                                if (!keepConnectionAlive)
+                                    responseStream.CloseAfterUse = true;
+
                                 var intercept = shouldInterceptHandler != null && interceptHandler != null && shouldInterceptHandler((data.Request, responseStream.ResponseHeaders));
                                 if (intercept)
                                 {

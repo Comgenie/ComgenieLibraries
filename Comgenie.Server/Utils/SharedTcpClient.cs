@@ -223,6 +223,7 @@ namespace Comgenie.Server.Utils
             private long CurrentDataPos { get; set; }
             private bool TransferEncodingChunked { get; set; }
             public bool IncludeChunkedHeadersInResponse { get; set; }
+            public bool CloseAfterUse { get; set; }
 
             public SingleHttpResponseStream(SharedTcpClient sharedTcpClient)
             {
@@ -412,8 +413,19 @@ namespace Comgenie.Server.Utils
             {
                 // If all data has been read, the CurrentContentLength will be 0
                 // During invalid responses the socket will be closed and it won't be reused anyway
-                if (CurrentContentLength == 0)
+                if (CurrentContentLength == 0 && !CloseAfterUse && Client.Connection != null)
+                {
                     Client.Connection.CanReuse = true;
+                }
+                else if (CloseAfterUse && Client.Connection != null)
+                {
+                    Client.Connection.CanReuse = false;
+                    try
+                    {
+                        Client.Connection.Stream.Close();
+                    }
+                    catch { }
+                }
 
                 Client.Dispose();
 
