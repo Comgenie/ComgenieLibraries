@@ -73,66 +73,7 @@ namespace Comgenie.AI
         /// </summary>
         public bool UseCacheIfAvailable { get; set; } = true;
 
-        /// <summary>
-        /// Control how the LLM will know about any added documents. 
-        /// It can be embedded within the last user message based on the user's input
-        /// or it can be handled by offering the LLM a tool call. 
-        /// </summary>
-        public DocumentReferencingMode DocumentReferencingMode { get; set; } = DocumentReferencingMode.FunctionCallDocuments;
-
-        /// <summary>
-        /// If two or more texts are found from the same document, but are located within this amount of non-included characters within each other
-        /// then it will be combined and given to the llm as one text.
-        /// </summary>
-        public int DocumentReferencingCombineCloseCharacterCount { get; set; } = 50;
-
-        /// <summary>
-        /// If a relevant text is found, it will also include this amount of characters before that text even if it's not that relevant but still useful for context
-        /// </summary>
-        public int DocumentReferencingExpandBeforeCharacterCount { get; set; } = 50;
-
-        /// <summary>
-        /// If a relevant text is found, it will also include this amount of characters after that text even if it's not that relevant but still useful for context
-        /// </summary>
-        public int DocumentReferencingExpandAfterCharacterCount { get; set; } = 50;
-
-        /// <summary>
-        /// Max size (including xml or json tags) of the text referencing any found relevant documents/texts.
-        /// The most relevant texts will always be at the top so less relevant texts will be ommited if it doesn't fit within this max size.
-        /// </summary>
-        public int DocumentReferencingMaxSize { get; set; } = 1024;
-
-        /// <summary>
-        /// When the referencing format is set to XML, this tag name will be used to contain the list.
-        /// By default: documents. But useful to change if you are referencing other things (code, memories, etc.)
-        /// </summary>
-        public string DocumentReferencingXMLDocumentsTagName { get; set; } = "documents";
-
-        /// <summary>
-        /// When the referencing format is set to XML, this tag name will be used to contain the list item.
-        /// By default: document. But useful to change if you are referencing other things (code, memories, etc.)
-        /// </summary>
-        public string DocumentReferencingXMLDocumentTagName { get; set; } = "document";
-
-        /// <summary>
-        /// When using the non-function call referencing modes. This text will be placed above any referenced document texts.
-        /// It will not be placed if there wasn't any relevant document texts.
-        /// </summary>
-        public string DocumentReferencingAddedInstruction { get; set; } = "Here are the related passages in the attached documents based on the user's last message";
-
-        /// <summary>
-        /// The reranking endpoint will give a score to each of the relevant texts found within the embeddings.
-        /// Use this to ommit any results giving a low relevance score.
-        /// </summary>
-        public double DocumentReferencingRelevanceThreshold { get; set; } = 0.75;
-
-        /// <summary>
-        /// When set, any text used to find related documents will be passed through this function and it's return value will be used instead.
-        /// Use this to strip out any injected tags or text to improve finding related documents.
-        /// If returning a null or empty string, the related documents finder will stop early and return 0 results.
-        /// </summary>
-        public Func<string, string>? OnDocumentRelatedText { get; set; }
-
+        
         /// <summary>
         /// When set, this action will be used as first attempt to trim chat messages to make it fit into the model's context size.
         /// This will only be called when the messages are exceeding the context size.
@@ -140,6 +81,11 @@ namespace Comgenie.AI
         /// </summary>
         public Action<List<ChatMessage>, long>? OnTrimMessages { get; set; } = null;
 
+        /// <summary>
+        /// When set to true (default), registered request modifiers will be executed before doing the actual request.
+        /// This can be used to inject information within the prompts like document summaries.
+        /// </summary>
+        public bool EnableRequestModifiers { get; set; } = true;
 
         /// <summary>
         /// Create a copy of this options instance so that all settings can be changed safely.
@@ -158,19 +104,11 @@ namespace Comgenie.AI
                 ContinueAfterToolCalls = ContinueAfterToolCalls,
                 FailedRequestRetryCount = FailedRequestRetryCount,
                 UseCacheIfAvailable = UseCacheIfAvailable,
-                DocumentReferencingMode = DocumentReferencingMode,
-                DocumentReferencingAddedInstruction = DocumentReferencingAddedInstruction,
-                DocumentReferencingMaxSize = DocumentReferencingMaxSize,
-                DocumentReferencingCombineCloseCharacterCount = DocumentReferencingCombineCloseCharacterCount,
-                DocumentReferencingExpandAfterCharacterCount = DocumentReferencingExpandAfterCharacterCount,
-                DocumentReferencingXMLDocumentsTagName = DocumentReferencingXMLDocumentsTagName,
-                DocumentReferencingExpandBeforeCharacterCount = DocumentReferencingExpandBeforeCharacterCount,
-                DocumentReferencingRelevanceThreshold = DocumentReferencingRelevanceThreshold,
-                DocumentReferencingXMLDocumentTagName = DocumentReferencingXMLDocumentTagName,
                 ContinueAfterToolCallsLimit = ContinueAfterToolCallsLimit,
-                OnDocumentRelatedText = OnDocumentRelatedText,
-                OnTrimMessages = OnTrimMessages
-
+                OnTrimMessages = OnTrimMessages,
+                ExtraRequestParameters = ExtraRequestParameters.ToDictionary(a=>a.Key, a => a.Value),
+                RequestTimeout = RequestTimeout,
+                EnableRequestModifiers = EnableRequestModifiers
             };
 
             if (executeOnClonedOptions != null)

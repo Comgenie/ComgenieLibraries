@@ -38,7 +38,7 @@ namespace Comgenie.AI
             {
                 generationOptions = generationOptions.Clone(); // We'll be modifying settings so make sure to do it in a copy
                 generationOptions.StopEarlyTextSequences = new string[] { "\n" };
-                generationOptions.DocumentReferencingMode = LLM.DocumentReferencingMode.None;
+                generationOptions.EnableRequestModifiers = false;
             }
 
             string PromptScript = "You are a helpful assistant that generates javascript based on the users question and instructions. You are allowed to be creative.";

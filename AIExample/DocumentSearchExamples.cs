@@ -19,21 +19,24 @@ namespace AIExample
             var question = "How does the ball cat toy look?";
             var llm = new LLM(model);
 
-            // Load a previously saved vector databse
-            //await llm.LoadDocumentsVectorDataBase("test.db");
+            // This makes sure that document summaries or function call instructions are added automatically.
+            llm.ConfigureDocumentAutomaticInclusionRequestModifier(new DocumentReferencingOptions()
+            {
+                Format = LLM.DocumentReferencingFormat.XML
+            });
 
-            await llm.AddDocument("notes.txt", File.ReadAllText("Room.txt"), LLM.DocumentEmbedMode.Overlapping);
+            // Also give the LLM access to the retrieve_documents toolcall
+            llm.ConfigureDocumentToolCalls(); 
+
+            // Load a previously saved vector databse
+            //await llm.LoadDocumentsVectorDataBaseAsync("test.db");
+
+            await llm.AddDocumentAsync("notes.txt", File.ReadAllText("Room.txt"), LLM.DocumentEmbedMode.Overlapping);
 
             // Save the current added documents and their vectors
-            // await llm.SaveDocumentsVectorDataBase("test.db", true);
+            // await llm.SaveDocumentsVectorDataBaseAsync("test.db", true);
 
-            // This sets the mode how the LLM can search and access the documents
-            // By default this is .FunctionCall which provides a function to call with a little bit of explanation.
-            // This is recommended when supported by the model, as the LLM might want to split questions up into multiple search queries.
-            // Also available: Json, XML and Markdown. These inject the related text passages based on the last message from the user in that format.
-            llm.DefaultGenerationOptions.DocumentReferencingMode = LLM.DocumentReferencingMode.FunctionCallDocuments;
-
-            // Do the actual request. The setting above will be used to let the LLM access the documents.
+            // Do the actual request.
             var response = await llm.GenerateResponseAsync(new List<ChatMessage>()
             {
                 new ChatSystemMessage("You are a helpful assistant. If you reference sources, use the following format: [[SourceName:Offset]]"),
@@ -47,7 +50,7 @@ namespace AIExample
             Console.WriteLine("Joke: " + JsonSerializer.Serialize(responseStructured));
 
             // A very slow but extensive deep dive going through the full document:
-            // var deepDiveResult = await llm.GenerateDeepDiveDocumentsResponse("What are all the colors mentioned in the documents?");
+            // var deepDiveResult = await llm.GenerateDeepDiveDocumentsResponseAsync("What are all the colors mentioned in the documents?");
             // Console.WriteLine("Deep dive result: " + deepDiveResult);
         }
 
@@ -75,7 +78,7 @@ namespace AIExample
             {
                 var text = randomFacts[i];
                 embeddings = await llm.GenerateEmbeddingsAsync(text);
-                vectorDb.Upsert("Fact " + i, embeddings);
+                vectorDb.Upsert(text, embeddings);
             }
 
             // Now search for the most relevant fact embeddings-wise (token distance)

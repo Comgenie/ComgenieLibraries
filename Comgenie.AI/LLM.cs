@@ -14,7 +14,21 @@ namespace Comgenie.AI
         private ModelInfo ActiveModel { get; set; }
         public double CostThisSession { get; internal set; } = 0.0;
         
+        /// <summary>
+        /// The default generation options used whenever there aren't any generation options passed through the Generate methods.
+        /// </summary>
         public LLMGenerationOptions DefaultGenerationOptions { get; set; } = new LLMGenerationOptions();
+
+        /// <summary>
+        /// Before the response is generated, the modifiers within this list will be executed first to do any last minute changes.
+        /// Unless 'EnableRequestModifiers' in the generation options is set to false.
+        /// 
+        /// Request modifiers are registed using a key so they can easily be identified and removed if needed.
+        /// </summary>
+        private Dictionary<string, RequestModifier> RequestModifiers { get; set; } = new();
+
+        public delegate Task RequestModifier(List<ChatMessage> messages, LLMGenerationOptions generationOptions, CancellationToken cancellationToken);
+
 
         /// <summary>
         /// When set, the user/assistant messages will automatically be trimmed to make this fit.
@@ -29,6 +43,7 @@ namespace Comgenie.AI
         private DateTime LastRequest { get; set; }
         private int CurrentRequestsSecond { get; set; } = 0;
         private int CurrentRequestsMinute { get; set; } = 0;
+
 
 
         public LLM(ModelInfo model, bool automaticModelInformationRetrieval = true)
@@ -73,6 +88,15 @@ namespace Comgenie.AI
                 MaxContentLength = model.ServerType == ModelInfo.ModelServerType.LlamaCpp ? 8_000 : 128_000;  
             }
             
+        }
+
+        public void RegisterRequestModifier(string key, RequestModifier requestModifier)
+        {
+            RequestModifiers[key] = requestModifier;
+        }
+        public void RemoveRequestModifier(string key)
+        {
+            RequestModifiers.Remove(key);
         }
         private class LlamaCppProps
         {

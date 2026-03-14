@@ -8,11 +8,13 @@ namespace Comgenie.AI
 {
     public partial class LLM
     {
-        
+
         /// <summary>
         /// Simple method to ask a question to the AI.
         /// </summary>
         /// <param name="userMessage">Question to ask to AI</param>
+        /// <param name="generationOptions">Optional: Options to control the LLM generation and behaviour within this method. If not set the .DefaultGenerationOptions is used.</param>
+        /// <param name="cancellationToken">Optional: Cancellation token to cancel the request early</param>
         /// <returns>If succeeded, a LLM response object containing the assistant message.</returns>
         public async Task<ChatResponse?> GenerateResponseAsync(string userMessage, LLMGenerationOptions? generationOptions = null, CancellationToken cancellationToken = default)
         {
@@ -28,8 +30,8 @@ namespace Comgenie.AI
         /// This method handles tool calls and continuations after tool calls if enabled.
         /// </summary>
         /// <param name="messages">List of at least 1 message.</param>
-        /// <param name="temperature">Optional: Temperature. Change to make the LLM respond more creative or not.</param>
-        /// <param name="addResponseToMessageList">Optional: If set to true, the given messages list will be expanded with the assistant response and if applicable: tool responses.</param>
+        /// <param name="generationOptions">Optional: Options to control the LLM generation and behaviour within this method. If not set the .DefaultGenerationOptions is used.</param>
+        /// <param name="cancellationToken">Optional: Cancellation token to cancel the request early</param>
         /// <returns>If succeeded, a LLM response object containing the assistant message.</returns>
         public async Task<ChatResponse?> GenerateResponseAsync(List<ChatMessage> messages, LLMGenerationOptions? generationOptions = null, CancellationToken cancellationToken = default)
         {
@@ -91,6 +93,8 @@ namespace Comgenie.AI
         /// </summary>
         /// <typeparam name="T">Type of an class with Instruction attributes helping the AI to populate the fields</typeparam>
         /// <param name="userMessage">Question to ask to AI</param>
+        /// <param name="generationOptions">Optional: Options to control the LLM generation and behaviour within this method. If not set the .DefaultGenerationOptions is used.</param>
+        /// <param name="cancellationToken">Optional: Cancellation token to cancel the request early</param>
         /// <returns>An instance of T with the populated fields</returns>
         public async Task<T?> GenerateStructuredResponseAsync<T>(string userMessage, LLMGenerationOptions? generationOptions = null, CancellationToken cancellationToken = default)
         {
@@ -108,6 +112,7 @@ namespace Comgenie.AI
         /// <param name="messages">A list which will be used for both input as adding the AI response to. If this list is empty, the required system message will be added automatically.</param>
         /// <param name="includeInstructionAndExampleJson">If set to true, an explanation of the JSON structure of T will be injected in the last user message.</param>
         /// <param name="generationOptions">Optional: Options to control the LLM generation and behaviour within this method. If not set the .DefaultGenerationOptions is used.</param>
+        /// <param name="cancellationToken">Optional: Cancellation token to cancel the request early</param>
         /// <returns>An instance of T with the populated fields</returns>
         public async Task<T?> GenerateStructuredResponseAsync<T>(List<ChatMessage> messages, bool includeInstructionAndExampleJson = true, LLMGenerationOptions? generationOptions = null, CancellationToken cancellationToken = default)
         {
@@ -174,44 +179,22 @@ namespace Comgenie.AI
         /// </summary>
         /// <param name="messages">List of at least 1 message.</param>
         /// <param name="generationOptions">Optional: Options to control the LLM generation and behaviour within this method. If not set the .DefaultGenerationOptions is used.</param>
+        /// <param name="cancellationToken">Optional: Cancellation token to cancel the request early</param>
         /// <returns>If succeeded, a LLM response object containing the assistant message.</returns>
         private async Task<ChatResponse?> ExecuteCompletionRequest(List<ChatMessage> messages, LLMGenerationOptions? generationOptions = null, CancellationToken cancellationToken = default)
         {
             if (generationOptions == null)
                 generationOptions = DefaultGenerationOptions;
 
-            if (DocumentVectorDB != null && generationOptions.DocumentReferencingMode != DocumentReferencingMode.None && messages.Last() is ChatUserMessage userMessage)
+            if (generationOptions.EnableRequestModifiers)
             {
-                var textContent = userMessage.content.FirstOrDefault(a => a is ChatMessageTextContent) as ChatMessageTextContent;
-                if (textContent != null)
-                {
-                    if (generationOptions.DocumentReferencingMode == DocumentReferencingMode.FunctionCallDocuments)
-                    {
-                        if (!Tools.Any(a => a.Function?.Name == "retrieve_documents"))
-                            AddToolCall(retrieve_documents);
-
-                        textContent.text = $"Note: There are {DocumentVectorDB.Documents.Count} documents attached to this conversation. Use the 'retrieve_documents' function to search through them."
-                            + "\r\n\r\n" + textContent.text;
-                    }
-                    else if (generationOptions.DocumentReferencingMode == DocumentReferencingMode.FunctionCallCode)
-                    {
-                        if (!Tools.Any(a => a.Function?.Name == "retrieve_code"))
-                            AddToolCall(retrieve_code);
-
-                        textContent.text = $"Note: There are {DocumentVectorDB.Documents.Count} code files/documents attached to this conversation. Use the 'retrieve_documents' function to search through them."
-                            + "\r\n\r\n" + textContent.text;
-                    }
-                    else
-                    {
-                        var summary = await GenerateRelatedDocumentsSummaryAsync(textContent.text, generationOptions, cancellationToken);
-                        if (!string.IsNullOrEmpty(summary))
-                            textContent.text = $"{generationOptions.DocumentReferencingAddedInstruction}:\r\n" + summary + "\r\n\r\n" + textContent.text;
-                    }
-                }
-            } 
+                foreach (var modifier in RequestModifiers)
+                    await modifier.Value(messages, generationOptions, cancellationToken);
+            }
 
             if (MaxContentLength.HasValue)
                 TrimOldMessages(messages, MaxContentLength.Value - 1000, generationOptions); // Space for response
+
             var completionRequest = new Dictionary<string, object>();
             completionRequest["model"] = ActiveModel.Name;
             completionRequest["temperature"] = generationOptions.Temperature;
@@ -335,6 +318,7 @@ namespace Comgenie.AI
         /// </summary>
         /// <param name="messages">List of messages, note that this list will be modified, but at least 2 messages will be kept in there. System messages will not be removed.</param>
         /// <param name="maxContextLength">Max context length to try to fit to</param>
+        /// <param name="generationOptions">Generation options for the 'OnTrimMessages' callback</param>
         /// <returns>Number of messages removed</returns>
         private int TrimOldMessages(List<ChatMessage> messages, long maxContextLength, LLMGenerationOptions generationOptions)
         {

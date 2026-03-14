@@ -6,6 +6,7 @@
         {
         }
         public string content { get; set; } = "";
+        //public string reasoning_content { get; set; } = ""; (Can't be used in requests to some endpoints)
         public List<ChatAssistantMessageToolCall>? tool_calls { get; set; }
     }
     public class ChatAssistantMessageToolCall
