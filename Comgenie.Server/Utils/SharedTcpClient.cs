@@ -18,7 +18,6 @@ namespace Comgenie.Server.Utils
     /// </summary>
     public class SharedTcpClient : IDisposable
     {
-        private const bool Debug = false;
         private static List<OpenConnection> ExistingConnections = new List<OpenConnection>();
         private static object ExistingConnectionsLockObj = new object();
 
@@ -26,7 +25,7 @@ namespace Comgenie.Server.Utils
         private static int InstanceCount = 0;
         private int CurrentInstanceNumber = 0;
 
-        public async Task ConnectAsync(string host, int port, bool ssl, int closeAfterSeconds = 60, CancellationToken cancellationToken = default)
+        public async Task ConnectAsync(string host, int port, bool ssl, int closeAfterSeconds = 5, bool alwaysUseNewConnection = false, CancellationToken cancellationToken = default)
         {
             CurrentInstanceNumber = ++InstanceCount;
             // Check if there is any open connection to reuse            
@@ -43,13 +42,16 @@ namespace Comgenie.Server.Utils
                 ExistingConnections = ExistingConnections.Where(a => !expiredConnections.Contains(a)).ToList();
 
                 // Find an existing connection
-                Log.Debug(nameof(SharedTcpClient), CurrentInstanceNumber + " Find existing connection");
-                var connection = ExistingConnections.FirstOrDefault(a => !a.InUse && a.Host == host && a.Port == port && a.Ssl == ssl);
-                if (connection != null)
+                if (!alwaysUseNewConnection)
                 {
-                    Log.Debug(nameof(SharedTcpClient), CurrentInstanceNumber + " Found!");
-                    connection.InUse = true;
-                    Connection = connection;
+                    Log.Debug(nameof(SharedTcpClient), CurrentInstanceNumber + " Find existing connection");
+                    var connection = ExistingConnections.FirstOrDefault(a => !a.InUse && a.Host == host && a.Port == port && a.Ssl == ssl);
+                    if (connection != null)
+                    {
+                        Log.Debug(nameof(SharedTcpClient), CurrentInstanceNumber + " Found!");
+                        connection.InUse = true;
+                        Connection = connection;
+                    }
                 }
             }
 
@@ -115,7 +117,8 @@ namespace Comgenie.Server.Utils
                     InUse = true,
                     LastActivity = DateTime.UtcNow,
                     Socket = socket,
-                    Stream = new RewindableStream(stream)
+                    Stream = new RewindableStream(stream),
+                    
                 };
 
                 lock (ExistingConnectionsLockObj)
@@ -181,7 +184,7 @@ namespace Comgenie.Server.Utils
         /// Helper methods
 
         // Execute http request and returns a stream with the full response
-        public static async Task<SingleHttpResponseStream> ExecuteHttpRequest(string url, string requestHeaders, Stream? requestContent, CancellationToken cancellationToken = default)
+        public static async Task<SingleHttpResponseStream> ExecuteHttpRequest(string url, string requestHeaders, Stream? requestContent, bool alwaysUseNewConnection = false, CancellationToken cancellationToken = default)
         {
             
             var uri = new Uri(url);
@@ -193,12 +196,12 @@ namespace Comgenie.Server.Utils
 
                 Log.Debug(nameof(SharedTcpClient), "Connecting to unix domain socket path: " + socketPath);
                 client = new SharedTcpClient();
-                await client.ConnectAsync(socketPath, 0, false, cancellationToken: cancellationToken);
+                await client.ConnectAsync(socketPath, 0, false, alwaysUseNewConnection: alwaysUseNewConnection, cancellationToken: cancellationToken);
             }
             else
             {
                 client = new SharedTcpClient();
-                await client.ConnectAsync(uri.Host, uri.Port, uri.Port == 443, cancellationToken: cancellationToken);
+                await client.ConnectAsync(uri.Host, uri.Port, uri.Port == 443, alwaysUseNewConnection: alwaysUseNewConnection, cancellationToken: cancellationToken);
             }
             
             client.Connection.CanReuse = false;
@@ -224,6 +227,7 @@ namespace Comgenie.Server.Utils
             private bool TransferEncodingChunked { get; set; }
             public bool IncludeChunkedHeadersInResponse { get; set; }
             public bool CloseAfterUse { get; set; }
+            public bool FinishedRequest { get; set; }
 
             public SingleHttpResponseStream(SharedTcpClient sharedTcpClient)
             {
@@ -246,15 +250,22 @@ namespace Comgenie.Server.Utils
                 Log.Debug(nameof(SingleHttpResponseStream), Client.CurrentInstanceNumber + " End initial reading buffer");
                 ResponseHeaders = Encoding.ASCII.GetString(buffer, 0, headerLength);
 
-                if (ResponseHeaders.Contains("Transfer-Encoding: chunked"))
+                // Any connection using 'Expect' should be treated as stateful and cannot be shared
+                if (ResponseHeaders.Contains("HTTP/1.1 100 ", StringComparison.OrdinalIgnoreCase))
+                    CloseAfterUse = true;
+
+                // TODO: Support keep-alive response header
+
+                if (ResponseHeaders.Contains("Transfer-Encoding: chunked", StringComparison.OrdinalIgnoreCase))
                 {
+                    Log.Debug(nameof(SingleHttpResponseStream), Client.CurrentInstanceNumber + " Response is chunked");
                     TransferEncodingChunked = true; // The read call will handle the content lengths
                     CurrentContentLength = -1;
                     CurrentDataPos = 0;
                     return;
                 }
 
-                var contentLength = ResponseHeaders.IndexOf("Content-Length:");
+                var contentLength = ResponseHeaders.IndexOf("Content-Length:", StringComparison.OrdinalIgnoreCase);
                 if (contentLength < 0)
                 {
                     // No content length, we cannot reuse this tcp client
@@ -303,7 +314,7 @@ namespace Comgenie.Server.Utils
             {
                 Log.Debug(nameof(SingleHttpResponseStream), Client.CurrentInstanceNumber + " Start reading (Content length " + CurrentContentLength + ")");
 
-                if (CurrentContentLength == 0)
+                if (CurrentContentLength == 0 || Client.Connection == null)
                 {
                     Log.Debug(nameof(SingleHttpResponseStream), Client.CurrentInstanceNumber + " No more data, returned 0");
                     return 0;
@@ -403,6 +414,7 @@ namespace Comgenie.Server.Utils
                     {
                         Log.Debug(nameof(SingleHttpResponseStream), Client.CurrentInstanceNumber + " Finished with request so setting current content length to 0, Chunked: " + TransferEncodingChunked);
                         CurrentContentLength = 0; // Set current content length to 0 to indicate we are fully finished handling this response
+                        FinishedRequest = true;
                     }
                 }
                 Log.Debug(nameof(SingleHttpResponseStream), Client.CurrentInstanceNumber + " End reading, returned " + len);
@@ -413,7 +425,7 @@ namespace Comgenie.Server.Utils
             {
                 // If all data has been read, the CurrentContentLength will be 0
                 // During invalid responses the socket will be closed and it won't be reused anyway
-                if (CurrentContentLength == 0 && !CloseAfterUse && Client.Connection != null)
+                if (FinishedRequest && CurrentContentLength == 0 && !CloseAfterUse && Client.Connection != null)
                 {
                     Client.Connection.CanReuse = true;
                 }

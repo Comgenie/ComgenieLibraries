@@ -30,7 +30,7 @@ namespace HttpServerExample
                 http.AddApplicationRoute(domain, "/app", new App(), lowerCaseMethods: false);
 
                 // Reverse proxy route
-                http.AddProxyRoute(domain, "/*", "https://miageru.net/");
+                http.AddProxyRoute(domain, "/proxy/*", "https://miageru.net/");
 
                 // Websocket route
                 http.AddWebsocketRoute(domain, "/websocket",

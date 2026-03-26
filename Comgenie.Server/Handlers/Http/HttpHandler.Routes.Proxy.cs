@@ -79,7 +79,7 @@ namespace Comgenie.Server.Handlers.Http
                             request.Append("\r\n");
 
                             
-                            using (var responseStream = await SharedTcpClient.ExecuteHttpRequest(targetUrl, request.ToString(), data.DataStream, cancellationToken))
+                            using (var responseStream = await SharedTcpClient.ExecuteHttpRequest(targetUrl, request.ToString(), data.DataStream, alwaysUseNewConnection: (attempt > 1), cancellationToken))
                             {
                                 if (!keepConnectionAlive)
                                     responseStream.CloseAfterUse = true;
