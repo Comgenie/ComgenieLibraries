@@ -41,13 +41,14 @@ namespace Comgenie.Util
 
         public override int Read(byte[] buffer, int offset, int count)
         {
+            // This method only writes to 'BufferStart'
+            
             if (StreamEnded && BufferEnd == BufferStart)
                 return 0;
 
             // Read from ring buffer
             while (BufferEnd == BufferStart && !StreamEnded)
                 Thread.Sleep(10); // Wait till buffer is filled
-
 
             var curEnd = BufferEnd; // Copy so the code is threadsafe
             if (BufferStart > curEnd)
@@ -80,6 +81,8 @@ namespace Comgenie.Util
 
         public override void Write(byte[] buffer, int offset, int count)
         {
+            // This method only writes to BufferEnd
+
             // Add to ring buffer
             while (count > 0)
             {
@@ -89,12 +92,12 @@ namespace Comgenie.Util
                 var curCount = count;
 
                 // Make sure we aren't passing the BufferStart                 
-                if (BufferEnd < curStart && curStart - BufferEnd > curCount)
+                if (BufferEnd <= curStart && curStart - BufferEnd < curCount)
                     curCount = curStart - BufferEnd;
 
                 // If we have to loop around the ring buffer, split this write into multiple writes
-                if (curCount > buffer.Length - BufferEnd)
-                    curCount = buffer.Length - BufferEnd;
+                if (curCount > Buffer.Length - BufferEnd)
+                    curCount = Buffer.Length - BufferEnd;
 
                 if (curCount == 0)
                 {
