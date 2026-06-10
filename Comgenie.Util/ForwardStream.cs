@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection.Metadata.Ecma335;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -16,7 +17,9 @@ namespace Comgenie.Util
         public bool CaptureWriter { get; set; } = false;
 
         private byte[] Buffer = new byte[1024 * 10];
-        private int BufferStart = 0;
+
+        // If BufferStart & BufferEnd are the same, then the buffer is empty
+        private int BufferStart = 0; 
         private int BufferEnd = 0;
 
         public override bool CanRead => true;
@@ -41,8 +44,7 @@ namespace Comgenie.Util
 
         public override int Read(byte[] buffer, int offset, int count)
         {
-            // This method only writes to 'BufferStart'
-            
+            // This method only writes to 'BufferStart'            
             if (StreamEnded && BufferEnd == BufferStart)
                 return 0;
 
@@ -51,19 +53,15 @@ namespace Comgenie.Util
                 Thread.Sleep(10); // Wait till buffer is filled
 
             var curEnd = BufferEnd; // Copy so the code is threadsafe
-            if (BufferStart > curEnd)
-                curEnd += Buffer.Length; // Loops around
+            var curLen = 0;
 
-            var curLen = curEnd - BufferStart;
+            if (BufferStart > curEnd)
+                curLen = Buffer.Length - BufferStart; // Rest of the remaining buffer before looping back
+            else
+                curLen = curEnd - BufferStart;
 
             if (count < curLen)
                 curLen = count;
-
-            if (curLen + BufferStart > Buffer.Length)
-            {
-                // Loop around, only return the part till the end of the buffer
-                curLen = Buffer.Length - BufferStart;
-            }
 
             Array.Copy(Buffer, BufferStart, buffer, offset, curLen);
             BufferStart = (BufferStart + curLen) % Buffer.Length;
@@ -85,18 +83,15 @@ namespace Comgenie.Util
 
             // Add to ring buffer
             while (count > 0)
-            {
+            {                
                 var curStart = BufferStart; // Copy so the code is threadsafe
-                curStart = (curStart - 1) % Buffer.Length; // Never use the full length of the ring buffer, so we can see the difference between full or empty
+                curStart = curStart == 0 ? (Buffer.Length - 1) : (curStart - 1); // Never use the full length of the ring buffer, so we can see the difference between full or empty
 
-                var curCount = count;
+                var curCount = 0;
 
-                // Make sure we aren't passing the BufferStart                 
-                if (BufferEnd <= curStart && curStart - BufferEnd < curCount)
+                if (BufferEnd <= curStart)
                     curCount = curStart - BufferEnd;
-
-                // If we have to loop around the ring buffer, split this write into multiple writes
-                if (curCount > Buffer.Length - BufferEnd)
+                else
                     curCount = Buffer.Length - BufferEnd;
 
                 if (curCount == 0)
@@ -104,6 +99,9 @@ namespace Comgenie.Util
                     Thread.Sleep(10); // Wait till buffer is emptied
                     continue;
                 }
+
+                if (count < curCount)
+                    curCount = count;
 
                 Array.Copy(buffer, offset, Buffer, BufferEnd, curCount);
 
