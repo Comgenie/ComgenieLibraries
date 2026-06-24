@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 17
-VisualStudioVersion = 17.5.33502.453
+# Visual Studio Version 18
+VisualStudioVersion = 18.3.11520.95 d18.3
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Comgenie.Server", "Comgenie.Server\Comgenie.Server.csproj", "{55DA78EA-896B-4729-8A2C-521B62987836}"
 EndProject
@@ -28,6 +28,8 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AIExample", "AIExample\AIExample.csproj", "{76ABBBC0-8E84-471F-A569-15192C7EFCDC}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Comgenie.AI.Scripting", "Comgenie.AI.Scripting\Comgenie.AI.Scripting.csproj", "{A70DA1AD-5CE5-4148-94F1-CCBCA4D750C8}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Comgenie.AI.Memory", "Comgenie.AI.Memory\Comgenie.AI.Memory.csproj", "{08052884-EEC0-42D1-92CE-3152E052BBAE}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -71,6 +73,10 @@ Global
 		{A70DA1AD-5CE5-4148-94F1-CCBCA4D750C8}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A70DA1AD-5CE5-4148-94F1-CCBCA4D750C8}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{A70DA1AD-5CE5-4148-94F1-CCBCA4D750C8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{08052884-EEC0-42D1-92CE-3152E052BBAE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{08052884-EEC0-42D1-92CE-3152E052BBAE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{08052884-EEC0-42D1-92CE-3152E052BBAE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{08052884-EEC0-42D1-92CE-3152E052BBAE}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

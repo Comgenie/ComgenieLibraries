@@ -14,20 +14,20 @@ namespace AIExample
         public static async Task AgentExample(ModelInfo model)
         {
             var llm = new LLM(model);
+            llm.AddAgent("JokeAgent", "An agent that is good at making jokes", "You are a joke making assistant. You are very good at making clever and funny jokes about any topic. After making a joke you should review it with a text reviewer agent.", true, false);
+            llm.AddAgent("TextReviewerAgent", "An agent that is good at reviewing text", "You are a text reviewer assistant. You are very good at reviewing text and providing feedback on how to improve it.", true, true);
 
-            var response = await llm.GenerateSolutionAsync(new List<ChatMessage>()
+            var response = await llm.GenerateResponseUsingAgentsAsync(new List<ChatMessage>()
             {
-                new ChatSystemMessage("You are a helpful assistant."),
                 new ChatUserMessage()
                 {
                     content = new()
                     {
-                        new ChatMessageTextContent("Write a clever joke about cats and coffee, then put it in a nice html format, and finally replace all the html tags with <DOG> tags")
+                        new ChatMessageTextContent("Write a clever joke about cats and coffee")
                     }
                 }
             });
-
-            Console.WriteLine(response?.LastChatResponse?.LastAsString());
+            Console.WriteLine(response?.LastAsString());
         }
     }
 }

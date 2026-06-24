@@ -41,5 +41,15 @@ namespace Comgenie.AI
             Tools.Clear();
         }
 
+        /// <summary>
+        /// Add all tool calls to work with files within a specific folder (and all sub folders).
+        /// </summary>
+        /// <param name="parentFolder">Folder to limit the tool calls to.</param>
+        /// <param name="readOnly">If true, the tool calls will only allow reading files, not writing or deleting.</param>
+        public void AddFileToolCalls(string parentFolder, bool readOnly = false)
+        {
+            // TODO
+        }
+
     }
 }
