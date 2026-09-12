@@ -33,8 +33,6 @@ namespace AIExample
             FlowExamples.FlowExample(model).Wait();
             FlowExamples.RepeatableFlowExample(model).Wait();
             FlowExamples.MultipleFlowExample(model).Wait();
-            
-            AgentExamples.AgentExample(model).Wait();
         }
     }
 }
