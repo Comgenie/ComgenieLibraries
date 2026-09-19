@@ -39,10 +39,10 @@ namespace Comgenie.Server
         /// Reset the cancel-timeout at the cancellation token source attached to this client.
         /// Use this to keep a connection alive. This is also done automatically after sending data to the client.
         /// </summary>
-        /// <param name="customTimeout">Custom timeout, by default it's set to 5 minutes</param>
+        /// <param name="customTimeout">Custom timeout, by default it's set to 60 minutes</param>
         public void ResetTimeout(TimeSpan? customTimeout = null)
         {
-            CancellationTokenSource.CancelAfter(customTimeout ?? new TimeSpan(0, 5, 0));
+            CancellationTokenSource.CancelAfter(customTimeout ?? new TimeSpan(0, 60, 0));
         }
         
         internal async Task AddIncomingBufferDataAsync(byte[] data, int dataLen, Action? callBackFinished = null, CancellationToken cancellationToken = default)

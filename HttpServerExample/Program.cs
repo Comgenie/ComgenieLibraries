@@ -57,6 +57,9 @@ namespace HttpServerExample
                 // WebDav route
                 http.AddApplicationRoute(domain, "/dav", new WebDavExample());
 
+                // MCP route
+                http.AddMcpRoute(domain, "/mcp", new McpExample(), true);
+
                 /// Start listening to http and https
                 server.Listen(80, false, http);
                 server.Listen(443, true, http);
